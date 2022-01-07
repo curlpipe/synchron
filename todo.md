@@ -1,0 +1,26 @@
+--- beta ---
+- [x] Display metadata through mpris
+- [x] Set up method to play tracks
+- [x] Set up basic mpris control
+- [x] Allow for toggling loop, shuffle, volume and position through mpris
+- [x] Transmit properties to playerctl
+- [x] Allow for seeking through mpris interface
+- [x] Build very basic cli frontend to test backend
+- [x] comment, format, clippy and commit
+--- release ---
+- [ ] Queueing (0.2.0)
+- [ ] Set up config file (0.3.0)
+- [ ] Allow creation of playlists (0.4.0)
+- [ ] Start work on tui frontend (0.5.0)
+- [ ] Link up library list through tui (0.6.0)
+- [ ] Set up status bar (0.7.0)
+- [ ] Link up library editing through tui (0.8.0)
+- [ ] Create panes (0.9.0)
+- [ ] Set up library view on pane 3 (0.10.0)
+- [ ] ID3 tag editing in library view (0.11.0)
+- [ ] Set up file browsing on pane 4 (0.12.0)
+- [ ] Set up artist -> album -> track sorting through tui on pane 1 (0.13.0)
+- [ ] Set up playlist mode on pane 2 (0.14.0)
+- [ ] Youtube-dl integration on pane 5 (0.15.0)
+- [ ] Tag guessing via Spotify API? (0.16.0)
+- [ ] Deezer integration on pane 6? (0.17.0)
