@@ -11,6 +11,7 @@
 
 #[macro_use]
 mod util;
+mod playlist;
 mod audio;
 mod mpris;
 
@@ -56,7 +57,7 @@ fn main() {
                 #[allow(clippy::float_cmp)]
                 if m.get_position().2 == 1. {
                     m.metadata.lock().unwrap().playback_status = PlaybackStatus::Stopped;
-                    m.stop();
+                    m.next();
                 }
                 std::mem::drop(m);
                 // Wait before next loop
@@ -71,9 +72,15 @@ fn main() {
         match cmd.as_str().split(' ').collect::<Vec<&str>>().as_slice() {
             // Opening media
             ["open", o @ ..] => m.load(Track::load(&o.join(" "))),
+            // Playlist handling
+            ["queue", o @ ..] => m.queue(Track::load(&o.join(" "))),
+            ["next"] => m.next().unwrap_or(()),
+            ["prev"] => m.previous().unwrap_or(()),
+            // Metadata
             ["status"] => {
                 let (p, d, pr) = m.get_position();
-                println!("{}s / {}s ({:.2}%)\n{}", p, d, pr * 100., m.metadata());
+                println!("{}s / {}s ({:.2}%)\n", p, d, pr * 100.);
+                print!("{}", m.playlist.view());
             }
             // Playing and pausing commands
             ["toggle"] => m.play_pause(),
@@ -114,7 +121,7 @@ fn main() {
                 let (p, d, pr) = m.get_position();
                 println!("{}s / {}s ({:.2}%)", p, d, pr * 100.);
             }
-            ["seek", "back"] => m.seek(false, Duration::from_secs(5)),
+            ["seek", "backward"] => m.seek(false, Duration::from_secs(5)),
             ["seek", "forward"] => m.seek(true, Duration::from_secs(5)),
             // Exit player
             ["exit"] => std::process::exit(0),

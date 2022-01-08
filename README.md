@@ -21,11 +21,14 @@ This prompt will be where you can type commands to control the player.
 | Command             | What it does                                  |
 |---------------------|-----------------------------------------------|
 | open [file]         | Opens the file specified, use `play` to play. |
+| queue [file]        | Adds a file to the queued tracks.             |
 | status              | Gets the metadata and position of the track.  |
 | toggle              | Plays if paused, pauses if playing.           |
 | play                | Play the track.                               |
 | pause               | Pause the track.                              |
 | stop                | Stop the track and reset to beginning.        |
+| next                | Moves to the next track in the queue.         |
+| prev                | Moves to the previous track in the queue.     |
 | loop off            | Turn off the loop feature.                    |
 | loop track          | Loop the current playing track.               |
 | loop playlist       | Loop the current playlist / album.            |
@@ -40,7 +43,7 @@ This prompt will be where you can type commands to control the player.
 | volume reset        | Reset the volume to 1.0                       |
 | position set [time] | Set the position to a position in seconds.    |
 | position get        | Get the position and duration of the track.   |
-| seek back           | Seek back 5 seconds.                          |
+| seek backward       | Seek back 5 seconds.                          |
 | seek forward        | Seek forwards 5 seconds.                      |
 | exit                | Exit the player gracefully.                   |
 

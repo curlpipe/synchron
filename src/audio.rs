@@ -8,6 +8,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
+use crate::playlist::PlayList;
 
 // Represents playback status
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,12 +34,13 @@ pub struct Metadata {
     pub shuffle_status: bool,
     pub volume: f64,
     pub position: i64,
-    pub track: Track,
+    pub tag: Tag,
 }
 
 // Main manager struct that handles everything
 pub struct Manager {
     player: Player,
+    pub playlist: PlayList,
     pub metadata: Arc<Mutex<Metadata>>,
     pub update_transmit: Sender<()>,
     pub mpris: Receiver<crate::mpris::Event>,
@@ -57,6 +59,8 @@ impl Manager {
         // Initiate player
         Self {
             player,
+            // Initialise an empty playlist
+            playlist: PlayList::default(),
             // Default placeholder values
             metadata: Arc::new(Mutex::new(Metadata {
                 playback_status: PlaybackStatus::Stopped,
@@ -64,7 +68,7 @@ impl Manager {
                 shuffle_status: false,
                 volume: 1.0,
                 position: 0,
-                track: Track::default(),
+                tag: Tag::default(),
             })),
             mpris: rx,
             update_transmit: tx2,
@@ -92,9 +96,15 @@ impl Manager {
         // Load a track into this player
         let mut md = self.metadata.lock().unwrap();
         md.playback_status = PlaybackStatus::Stopped;
-        self.player.set_uri(&track.path);
-        md.track = track;
+        md.tag = track.tag.clone();
+        self.playlist.play(track);
+        self.player.set_uri(self.playlist.current().unwrap().path.as_str());
         self.update();
+    }
+
+    pub fn queue(&mut self, track: Track) {
+        // Queue a track
+        self.playlist.queue(track);
     }
 
     pub fn play(&mut self) {
@@ -128,6 +138,24 @@ impl Manager {
         md.playback_status = PlaybackStatus::Stopped;
         self.player.stop();
         self.update();
+    }
+
+    pub fn next(&mut self) -> Option<()> {
+        let next = self.playlist.next()?;
+        self.player.set_uri(&next.path);
+        self.metadata.lock().unwrap().tag = next.tag.clone();
+        self.play();
+        self.update();
+        Some(())
+    }
+
+    pub fn previous(&mut self) -> Option<()> {
+        let previous = self.playlist.previous()?;
+        self.player.set_uri(&previous.path);
+        self.metadata.lock().unwrap().tag = previous.tag.clone();
+        self.play();
+        self.update();
+        Some(())
     }
 
     pub fn set_loop(&mut self, s: LoopStatus) {
@@ -196,7 +224,11 @@ impl Manager {
 
     pub fn metadata(&mut self) -> String {
         // Return the formatted metadata information
-        self.metadata.lock().unwrap().track.metadata()
+        if let Some(track) = self.playlist.current() {
+            track.metadata()
+        } else {
+            String::new()
+        }
     }
 
     pub fn update(&self) {
@@ -239,5 +271,13 @@ impl Track {
     pub fn format_path(path: &str) -> String {
         // Unify the path format
         path.trim_start_matches("file://").to_string()
+    }
+
+    pub fn format(&self) -> String {
+        let title = self.tag.title().unwrap_or("[unknown]").to_string();
+        let album = self.tag.album().unwrap_or("[unknown]").to_string();
+        let artist = self.tag.artist().unwrap_or("[unknown]").to_string();
+        let year = self.tag.year().unwrap_or(0).to_string();
+        format!("{} | {} | {} | {} | {}", self.path, title, album, artist, year)
     }
 }

@@ -8,7 +8,6 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] Queueing (0.2.0)
 - [ ] Set up config file (0.3.0)
 - [ ] Allow creation of playlists (0.4.0)
 - [ ] Start work on tui frontend (0.5.0)
@@ -24,3 +23,4 @@
 - [ ] Youtube-dl integration on pane 5 (0.15.0)
 - [ ] Tag guessing via Spotify API? (0.16.0)
 - [ ] Deezer integration on pane 6? (0.17.0)
+- [x] Queueing (0.2.0)

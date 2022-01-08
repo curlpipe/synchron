@@ -136,7 +136,7 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
         b.property("Metadata").get({
             let md = player_md.clone();
             move |_, _| {
-                let mut export = mpris_metadata(&md.lock().unwrap().track.tag);
+                let mut export = mpris_metadata(&md.lock().unwrap().tag);
                 export.insert(
                     "mpris:trackid".to_string(),
                     Variant(Box::new(DbusPath::new("/").unwrap())),
@@ -216,7 +216,7 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
             add_prop!(
                 changed.changed_properties,
                 "Metadata",
-                mpris_metadata(&m.track.tag)
+                mpris_metadata(&m.tag)
             );
             // Send the message
             c.channel()
