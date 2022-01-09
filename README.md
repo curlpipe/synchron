@@ -47,5 +47,16 @@ This prompt will be where you can type commands to control the player.
 | seek forward        | Seek forwards 5 seconds.                      |
 | exit                | Exit the player gracefully.                   |
 
+# Configuration
+At the moment, configuration is only very basic. It uses the `ron` format.
+You can find an example config file at `synchron.ron`.
+
+Firstly, it will check at `~/.config/synchron.ron` for a configuration file,
+if not found, it will check at `./synchron.ron` (the current directory).
+Otherwise, it will use the default configuration.
+
+As of yet, there is only one configuration option:
+- `prompt` - A string that determines how the prompt looks for typing in commands.
+
 # Notes
 This takes inspiration from `termusic` and `cmus`.
