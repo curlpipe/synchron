@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::util::expand_path;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT: &str = include_str!("../synchron.ron");
 

@@ -1,4 +1,7 @@
 // audio.rs - handling music playback
+use crate::config::Config;
+use crate::playlist::PlayList;
+use crate::util::expand_path;
 use gstreamer::prelude::*;
 use gstreamer::ClockTime;
 use gstreamer_player::{Player, PlayerGMainContextSignalDispatcher, PlayerSignalDispatcher};
@@ -8,9 +11,6 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
-use crate::playlist::PlayList;
-use crate::config::Config;
-use crate::util::expand_path;
 
 // Represents playback status
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -105,7 +105,8 @@ impl Manager {
         md.playback_status = PlaybackStatus::Stopped;
         md.tag = track.tag.clone();
         self.playlist.play(track);
-        self.player.set_uri(self.playlist.current().unwrap().path.as_str());
+        self.player
+            .set_uri(self.playlist.current().unwrap().path.as_str());
         self.update();
     }
 
@@ -150,7 +151,7 @@ impl Manager {
     pub fn next(&mut self) -> Option<()> {
         let next = self.playlist.next()?;
         self.player.set_uri(&next.path);
-        self.metadata.lock().unwrap().tag = next.tag.clone();
+        self.metadata.lock().unwrap().tag = next.tag;
         self.play();
         self.update();
         Some(())
@@ -159,7 +160,7 @@ impl Manager {
     pub fn previous(&mut self) -> Option<()> {
         let previous = self.playlist.previous()?;
         self.player.set_uri(&previous.path);
-        self.metadata.lock().unwrap().tag = previous.tag.clone();
+        self.metadata.lock().unwrap().tag = previous.tag;
         self.play();
         self.update();
         Some(())
@@ -283,6 +284,9 @@ impl Track {
         let album = self.tag.album().unwrap_or("[unknown]").to_string();
         let artist = self.tag.artist().unwrap_or("[unknown]").to_string();
         let year = self.tag.year().unwrap_or(0).to_string();
-        format!("{} | {} | {} | {} | {}", self.path, title, album, artist, year)
+        format!(
+            "{} | {} | {} | {} | {}",
+            self.path, title, album, artist, year
+        )
     }
 }

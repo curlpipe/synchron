@@ -27,7 +27,7 @@ impl PlayList {
             self.queue_next(track);
             self.next()
         }
-   }
+    }
 
     pub fn set(&mut self, ptr: usize, tracks: Vec<Track>) {
         // Insert a custom playlist to use, as well as an index to start from
@@ -51,7 +51,7 @@ impl PlayList {
         }
     }
 
-    pub fn previous(&mut self) -> Option<Track>  {
+    pub fn previous(&mut self) -> Option<Track> {
         // Switch to the previously played track
         if self.ptr > 0 {
             self.ptr -= 1;
@@ -85,7 +85,11 @@ impl PlayList {
     pub fn view(&mut self) -> String {
         let mut result = String::new();
         for (c, track) in self.tracks.iter().enumerate() {
-            result.push_str(&format!("{}{}\n", if c == self.ptr { "-> " } else { "   " }, track.format()));
+            result.push_str(&format!(
+                "{}{}\n",
+                if c == self.ptr { "-> " } else { "   " },
+                track.format()
+            ));
         }
         result
     }

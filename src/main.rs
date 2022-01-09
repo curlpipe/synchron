@@ -11,10 +11,10 @@
 
 #[macro_use]
 mod util;
-mod config;
-mod playlist;
 mod audio;
+mod config;
 mod mpris;
+mod playlist;
 
 use audio::{LoopStatus, Manager, PlaybackStatus, Track};
 use mpris::Event;
