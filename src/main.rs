@@ -11,6 +11,7 @@
 
 #[macro_use]
 mod util;
+mod config;
 mod playlist;
 mod audio;
 mod mpris;
@@ -67,7 +68,7 @@ fn main() {
     });
     // Initiate a control prompt for the player
     loop {
-        let cmd = scanln!("> ");
+        let cmd = scanln!("{}", m.lock().unwrap().config.prompt);
         let mut m = m.lock().unwrap();
         match cmd.as_str().split(' ').collect::<Vec<&str>>().as_slice() {
             // Opening media

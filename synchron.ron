@@ -1,0 +1,11 @@
+/*
+    Synchron config file example
+
+    For information about the ron file format, please see:
+    https://github.com/ron-rs/ron
+*/
+
+(
+    // This is the prompt that will be shown in the command line interface
+    prompt: "> ",
+)

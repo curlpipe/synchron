@@ -1,13 +1,21 @@
 [package]
 name = "synchron"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
+# For MPRIS
 dbus = "0.9.5"
 dbus-crossroads = "0.5.0"
+# For path expansion
 expanduser = "1.2.2"
+# For playing audio
 gstreamer = "0.17.4"
 gstreamer-player = "0.17.0"
+# For reading music metadata
 id3 = "0.6.6"
+# For configuration
+ron = "0.7.0"
+serde = { version = "1", features = ["derive"] }
+# For UI
 scanln = "0.1.1"

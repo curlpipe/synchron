@@ -9,6 +9,8 @@ use std::sync::{
 };
 use std::time::Duration;
 use crate::playlist::PlayList;
+use crate::config::Config;
+use crate::util::expand_path;
 
 // Represents playback status
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -44,6 +46,7 @@ pub struct Manager {
     pub metadata: Arc<Mutex<Metadata>>,
     pub update_transmit: Sender<()>,
     pub mpris: Receiver<crate::mpris::Event>,
+    pub config: Config,
 }
 
 impl Manager {
@@ -58,6 +61,7 @@ impl Manager {
         let (tx2, _) = mpsc::channel();
         // Initiate player
         Self {
+            // Create player
             player,
             // Initialise an empty playlist
             playlist: PlayList::default(),
@@ -70,8 +74,11 @@ impl Manager {
                 position: 0,
                 tag: Tag::default(),
             })),
+            // Add in mpris information channels
             mpris: rx,
             update_transmit: tx2,
+            // Load in config file
+            config: Config::open(),
         }
     }
 
@@ -248,9 +255,7 @@ impl Track {
     pub fn load(path: &str) -> Self {
         // Expand provided path, read the tags and create new instance
         let path = Track::format_path(path);
-        let path = expanduser::expanduser(path).unwrap();
-        let path = std::fs::canonicalize(path).expect("File not found");
-        let path = path.into_os_string().into_string().unwrap();
+        let path = expand_path(&path).expect("File not found");
         let tag = Tag::read_from_path(&path).unwrap_or_else(|_| Tag::new());
         let path = format!("file://{}", path);
         Self { path, tag }

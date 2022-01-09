@@ -8,7 +8,6 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] Set up config file (0.3.0)
 - [ ] Allow creation of playlists (0.4.0)
 - [ ] Start work on tui frontend (0.5.0)
 - [ ] Link up library list through tui (0.6.0)
@@ -20,7 +19,7 @@
 - [ ] Set up file browsing on pane 4 (0.12.0)
 - [ ] Set up artist -> album -> track sorting through tui on pane 1 (0.13.0)
 - [ ] Set up playlist mode on pane 2 (0.14.0)
-- [ ] Youtube-dl integration on pane 5 (0.15.0)
+- [ ] Music discovery on pane 5 (0.15.0)
 - [ ] Tag guessing via Spotify API? (0.16.0)
-- [ ] Deezer integration on pane 6? (0.17.0)
 - [x] Queueing (0.2.0)
+- [x] Set up config file (0.3.0)
