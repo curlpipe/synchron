@@ -1,5 +1,6 @@
 // mpris.rs - handling mpris interactions
-use crate::audio::{LoopStatus, Metadata, Tag};
+use crate::audio::{LoopStatus, Metadata};
+use crate::track::Tag;
 use dbus::arg::{RefArg, Variant};
 use dbus::blocking::Connection;
 use dbus::channel::MatchingReceiver;

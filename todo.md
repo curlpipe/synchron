@@ -8,7 +8,6 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] ID3 tag editing (0.5.0)
 - [ ] Start work on tui frontend (0.6.0)
 - [ ] Link up library list through tui (0.7.0)
 - [ ] Set up status bar (0.8.0)
@@ -25,3 +24,4 @@
 - [x] Queueing (0.2.0)
 - [x] Set up config file (0.3.0)
 - [x] Allow creation of playlists (0.4.0)
+- [x] ID3 tag editing (0.5.0)

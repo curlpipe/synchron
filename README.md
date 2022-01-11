@@ -24,6 +24,7 @@ This prompt will be where you can type commands to control the player.
 |                             | Use `play` to play.                                   |
 | queue [id]                  | Adds the track from the library ID to the queued      |
 |                             | tracks.                                               |
+| clear                       | Clear the queue and stop playback.                    |
 | status                      | Gets the metadata and position of the track.          |
 | toggle                      | Plays if paused, pauses if playing.                   |
 | play                        | Play the track.                                       |
@@ -50,13 +51,20 @@ This prompt will be where you can type commands to control the player.
 | open playlist [name]        | Opens the specified playlist, use `play` to play .    |
 | library                     | List all tracks in the library.                       |
 | library add [file]          | Add a track to the library.                           |
-| library remove [id]         | Remove a track from the library by it's ID.           |
+| library remove [id]         | Remove a track from the library by its ID.            |
 | playlist add [name] [id]    | Add a track at the library ID to the playlist.        |
 | playlist remove [name] [id] | Remove a track from a playlist (by playlist index).   |
 | playlist                    | List all playlists.                                   |
 | playlist [name]             | List tracks on the specified playlist.                |
 | playlist delete [name]      | Delete a specified playlist.                          |
 | playlist rename [old] [new] | Rename a specified playlist to a new name.            |
+| tag title [id] [title]      | Set the title of a track by its ID.                   |
+| tag album [id] [album]      | Set the album of a track by its ID.                   |
+| tag artist [id] [artist]    | Set the artist of a track by its ID.                  |
+| tag year [id] [year]        | Set the year of a track by its ID.                    |
+| tag update [id]             | Reread the tag from a track by its ID.                |
+| tag [id]                    | List the tag of a track by its ID.                    |
+| exit                        | Exit the player.                                      |
 
 ## What is the library?
 The library is the list of tracks remembered by the player to play. You can use the `library` command to see the list of all the tracks in the library and their corresponding IDs. The IDs can be used in the open, queue and playlist commands. To add tracks into the library see the `library add` command in the table above.

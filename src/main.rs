@@ -15,12 +15,14 @@ mod audio;
 mod config;
 mod mpris;
 mod playlist;
+mod track;
 
-use audio::{LoopStatus, Manager, PlaybackStatus, Track};
+use audio::{LoopStatus, Manager, PlaybackStatus};
 use mpris::Event;
 use scanln::scanln;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use track::Track;
 
 fn main() {
     // Build and initialise a manager
@@ -38,6 +40,13 @@ fn main() {
             // Opening media
             ["open", "playlist", p] => m.load_playlist(p),
             ["open", t] => m.load(t.parse().unwrap_or(0)),
+            // File tagging
+            ["tag", "title", i, t @ ..] => m.set_title(i.parse().unwrap_or(0), &t.join(" ")),
+            ["tag", "album", i, a @ ..] => m.set_album(i.parse().unwrap_or(0), &a.join(" ")),
+            ["tag", "artist", i, a @ ..] => m.set_artist(i.parse().unwrap_or(0), &a.join(" ")),
+            ["tag", "year", i, y] => m.set_year(i.parse().unwrap_or(0), y),
+            ["tag", "update", i] => m.update_tag(i.parse().unwrap_or(0)),
+            ["tag", i] => m.view_track(i.parse().unwrap_or(0)),
             // Library commands
             ["library"] => println!("{}", m.list_library()),
             ["library", "add", o @ ..] => {
@@ -53,6 +62,7 @@ fn main() {
             ["playlist", "delete", p] => m.delete_playlist(p),
             ["playlist", "rename", o, n] => m.rename_playlist(o, n),
             ["queue", t] => m.queue(t.parse().unwrap_or(0)),
+            ["clear"] => m.clear_queue(),
             ["next"] => m.next().unwrap_or(()),
             ["prev"] => m.previous().unwrap_or(()),
             // Metadata

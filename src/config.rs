@@ -1,5 +1,5 @@
 // config.rs - manage config file and databases
-use crate::audio::Track;
+use crate::track::Track;
 use crate::util::{attempt_open, expand_path};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

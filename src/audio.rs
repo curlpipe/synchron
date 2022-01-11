@@ -1,11 +1,10 @@
 // audio.rs - handling music playback
 use crate::config::{Config, Database};
 use crate::playlist::PlayList;
-use crate::util::expand_path;
+use crate::track::{Tag, Track};
 use gstreamer::prelude::*;
 use gstreamer::ClockTime;
 use gstreamer_player::{Player, PlayerGMainContextSignalDispatcher, PlayerSignalDispatcher};
-use serde::{Deserialize, Serialize};
 use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
@@ -233,6 +232,12 @@ impl Manager {
         }
     }
 
+    pub fn clear_queue(&mut self) {
+        // Clear the queue and stop playback
+        self.playlist.clear();
+        self.stop();
+    }
+
     pub fn play(&mut self) {
         // Play the current track
         if !self.playlist.is_empty() {
@@ -270,6 +275,7 @@ impl Manager {
     }
 
     pub fn next(&mut self) -> Option<()> {
+        // Move to the next track
         let next = self.playlist.next()?;
         self.player.set_uri(&next.path);
         self.metadata.lock().unwrap().tag = next.tag;
@@ -279,6 +285,7 @@ impl Manager {
     }
 
     pub fn previous(&mut self) -> Option<()> {
+        // Move to the previous track
         let previous = self.playlist.previous()?;
         self.player.set_uri(&previous.path);
         self.metadata.lock().unwrap().tag = previous.tag;
@@ -352,14 +359,18 @@ impl Manager {
     }
 
     pub fn list_library(&self) -> String {
+        // List all the tracks in the library
+        let mut keys: Vec<usize> = self.database.tracks.keys().copied().collect();
+        keys.sort_unstable();
         let mut result = String::new();
-        for (id, track) in &self.database.tracks {
-            result.push_str(&format!("{}: {}\n", id, track.path));
+        for id in keys {
+            result.push_str(&format!("{}: {}\n", id, self.database.tracks[&id].format()));
         }
         result
     }
 
     pub fn add_library(&mut self, track: Track) -> usize {
+        // Add a track to the library
         let mut keys: Vec<usize> = self.database.tracks.keys().copied().collect();
         keys.sort_unstable();
         let mut i = 0;
@@ -377,6 +388,7 @@ impl Manager {
     }
 
     pub fn remove_library(&mut self, id: usize) {
+        // Remove a track from the library
         self.database.tracks.remove(&id);
         for values in self.database.playlists.values_mut() {
             if let Some(idx) = values.iter().position(|x| *x == id) {
@@ -386,75 +398,67 @@ impl Manager {
         self.database.write();
     }
 
+    pub fn set_title(&mut self, id: usize, new: &str) {
+        // Set the title of a track
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            track.set_title(new);
+            self.database.write();
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
+    pub fn set_album(&mut self, id: usize, new: &str) {
+        // Set the album of a track
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            track.set_album(new);
+            self.database.write();
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
+    pub fn set_artist(&mut self, id: usize, new: &str) {
+        // Set the artist of a track
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            track.set_artist(new);
+            self.database.write();
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
+    pub fn set_year(&mut self, id: usize, new: &str) {
+        // Set the year of a track
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            track.set_year(new);
+            self.database.write();
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
+    pub fn update_tag(&mut self, id: usize) {
+        // Reread the tags of a track
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            track.update();
+            self.database.write();
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
+    pub fn view_track(&mut self, id: usize) {
+        // View track metadata
+        if let Some(track) = self.database.tracks.get_mut(&id) {
+            println!("{}", track.format());
+        } else {
+            println!("ERROR: Track ID out of range: {}", id);
+        }
+    }
+
     pub fn update(&self) {
         // Send the update signal for mpris to update it's values
         self.update_transmit.send(()).unwrap();
-    }
-}
-
-// For holding tag information
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct Tag {
-    pub title: String,
-    pub album: String,
-    pub artist: String,
-    pub year: String,
-}
-
-impl Tag {
-    pub fn from_id3(tag: &id3::Tag) -> Self {
-        // Load from id3 tag
-        Self {
-            title: tag.title().unwrap_or("[unknown]").to_string(),
-            album: tag.album().unwrap_or("[unknown]").to_string(),
-            artist: tag.artist().unwrap_or("[unknown]").to_string(),
-            year: tag.year().unwrap_or(0).to_string(),
-        }
-    }
-}
-
-impl Default for Tag {
-    fn default() -> Self {
-        // Default value for a tag
-        Self {
-            title: "[unknown]".to_string(),
-            album: "[unknown]".to_string(),
-            artist: "[unknown]".to_string(),
-            year: "0".to_string(),
-        }
-    }
-}
-
-// Track struct to handle file reading, and tag extraction
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
-pub struct Track {
-    pub path: String,
-    pub tag: Tag,
-}
-
-impl Track {
-    pub fn load(path: &str) -> Self {
-        // Expand provided path, read the tags and create new instance
-        let path = Track::format_path(path);
-        let path = expand_path(&path).expect("File not found");
-        let tag = id3::Tag::read_from_path(&path).unwrap_or_else(|_| id3::Tag::new());
-        let path = format!("file://{}", path);
-        Self {
-            path,
-            tag: Tag::from_id3(&tag),
-        }
-    }
-
-    pub fn format_path(path: &str) -> String {
-        // Unify the path format
-        path.trim_start_matches("file://").to_string()
-    }
-
-    pub fn format(&self) -> String {
-        let tag = &self.tag;
-        format!(
-            "{} | {} | {} | {} | {}",
-            self.path, tag.title, tag.album, tag.artist, tag.year
-        )
     }
 }
