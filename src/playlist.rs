@@ -93,4 +93,8 @@ impl PlayList {
         }
         result
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty()
+    }
 }

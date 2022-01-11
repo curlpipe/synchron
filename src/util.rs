@@ -14,3 +14,8 @@ pub fn expand_path(path: &str) -> Option<String> {
     let full_path = std::fs::canonicalize(with_user).ok()?;
     full_path.into_os_string().into_string().ok()
 }
+
+pub fn attempt_open(path: &str) -> Option<String> {
+    let path = expand_path(path)?;
+    std::fs::read_to_string(path).ok()
+}

@@ -1,7 +1,11 @@
-use crate::util::expand_path;
+// config.rs - manage config file and databases
+use crate::audio::Track;
+use crate::util::{attempt_open, expand_path};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-const DEFAULT: &str = include_str!("../synchron.ron");
+const DEFAULT_CONFIG: &str = include_str!("../synchron.ron");
+const DEFAULT_DATABASE: &str = include_str!("../database.ron");
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
@@ -19,12 +23,59 @@ impl Config {
         } else {
             // Use embedded config
             println!("Note: using default config");
-            ron::from_str(DEFAULT).expect("Invalid config file format!")
+            ron::from_str(DEFAULT_CONFIG).expect("Invalid config file format!")
         }
     }
 }
 
-pub fn attempt_open(path: &str) -> Option<String> {
-    let path = expand_path(path)?;
-    std::fs::read_to_string(path).ok()
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Database {
+    pub tracks: HashMap<usize, Track>,
+    pub playlists: HashMap<String, Vec<usize>>,
+}
+
+impl Database {
+    pub fn open() -> Self {
+        // Attempt to open the database
+        let path_base =
+            expand_path("~/.local/share").unwrap_or_else(|| "~/.local/share".to_string());
+        std::fs::create_dir_all(format!("{}/synchron/", path_base)).ok();
+        let path_full = format!("{}/synchron/database.ron", path_base);
+        if std::path::Path::new(&path_full).exists() {
+            // File exists
+            if let Some(database) = attempt_open("~/.local/share/synchron/database.ron") {
+                // Database read sucessfully
+                ron::from_str(&database).expect("Database is corrupted")
+            } else {
+                // Failed to read database, use empty one
+                println!("Note: failed to open database, using empty database");
+                ron::from_str(DEFAULT_DATABASE).expect("Database is corrupted")
+            }
+        } else {
+            // File doesn't exist, attempt to write an empty one
+            println!("Note: Database not detected, creating empty database");
+            if std::fs::write(&path_full, DEFAULT_DATABASE).is_err() {
+                // Failed to create database, display error
+                println!("ERROR: Failed to create database, using empty database");
+            }
+            // Read in an empty database
+            ron::from_str(DEFAULT_DATABASE).expect("Database is corrupted")
+        }
+    }
+
+    pub fn write(&self) {
+        let path_base =
+            expand_path("~/.local/share").unwrap_or_else(|| "~/.local/share".to_string());
+        std::fs::create_dir_all(format!("{}/synchron/", path_base)).ok();
+        let path_full = format!("{}/synchron/database.ron", path_base);
+        if !std::path::Path::new(&path_full).exists() {
+            println!("Warning: Database not found, these changes will not be saved");
+            return;
+        }
+        if let Ok(write) = ron::ser::to_string(self) {
+            if std::fs::write(path_full, write).is_err() {
+                println!("ERROR: Failed to write to disk");
+            }
+        }
+    }
 }

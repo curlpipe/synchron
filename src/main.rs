@@ -28,53 +28,31 @@ fn main() {
     m.init();
     // Allow for it to be accessed from threads
     let m = Arc::new(Mutex::new(m));
-    // Spawn a manager event loop, which handles mpris requests
-    std::thread::spawn({
-        let m = m.clone();
-        move || {
-            // Handle events
-            loop {
-                // Handle mpris event
-                let mut m = m.lock().unwrap();
-                if let Ok(e) = m.mpris.try_recv() {
-                    match e {
-                        Event::OpenUri(uri) => m.load(Track::load(&uri)),
-                        Event::Pause => m.pause(),
-                        Event::Play => m.play(),
-                        Event::PlayPause => m.play_pause(),
-                        Event::SetVolume(v) => m.set_volume(v),
-                        Event::SetLoopStatus(s) => m.set_loop(s),
-                        Event::SetShuffleStatus(s) => m.set_shuffle(s),
-                        Event::SetPosition(p) => m.set_position(p),
-                        Event::Seek(f, s) => m.seek(f, s),
-                        Event::Stop => m.stop(),
-                        Event::Next => println!("Next!"),
-                        Event::Previous => println!("Previous!"),
-                        Event::Raise | Event::Quit => (),
-                    }
-                }
-
-                // Stop status after track has finished
-                #[allow(clippy::float_cmp)]
-                if m.get_position().2 == 1. {
-                    m.metadata.lock().unwrap().playback_status = PlaybackStatus::Stopped;
-                    m.next();
-                }
-                std::mem::drop(m);
-                // Wait before next loop
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    });
+    // Start mpris event loop
+    spawn_mpris(&m);
     // Initiate a control prompt for the player
     loop {
         let cmd = scanln!("{}", m.lock().unwrap().config.prompt);
         let mut m = m.lock().unwrap();
         match cmd.as_str().split(' ').collect::<Vec<&str>>().as_slice() {
             // Opening media
-            ["open", o @ ..] => m.load(Track::load(&o.join(" "))),
-            // Playlist handling
-            ["queue", o @ ..] => m.queue(Track::load(&o.join(" "))),
+            ["open", "playlist", p] => m.load_playlist(p),
+            ["open", t] => m.load(t.parse().unwrap_or(0)),
+            // Library commands
+            ["library"] => println!("{}", m.list_library()),
+            ["library", "add", o @ ..] => {
+                let _ = m.add_library(Track::load(&o.join(" ")));
+            }
+            ["library", "remove", i] => m.remove_library(i.parse().unwrap_or(0)),
+            // Queue and playlist handling
+            ["playlist", "add", p, i] => m.add_to_playlist(p, i.parse().unwrap_or(0)),
+            ["playlist", "remove", p, i] => m.remove_from_playlist(p, i.parse().unwrap_or(0)),
+            ["playlist", "new", p] => m.new_playlist(p),
+            ["playlist"] => println!("{}", m.list_playlists()),
+            ["playlist", p] => println!("{}", m.list_playlist(p)),
+            ["playlist", "delete", p] => m.delete_playlist(p),
+            ["playlist", "rename", o, n] => m.rename_playlist(o, n),
+            ["queue", t] => m.queue(t.parse().unwrap_or(0)),
             ["next"] => m.next().unwrap_or(()),
             ["prev"] => m.previous().unwrap_or(()),
             // Metadata
@@ -131,4 +109,46 @@ fn main() {
         }
         std::mem::drop(m);
     }
+}
+
+fn spawn_mpris(m: &Arc<Mutex<Manager>>) {
+    // Spawn a manager event loop, which handles mpris requests
+    std::thread::spawn({
+        let m = m.clone();
+        move || {
+            // Handle events
+            loop {
+                // Handle mpris event
+                let mut m = m.lock().unwrap();
+                if let Ok(e) = m.mpris.try_recv() {
+                    match e {
+                        Event::OpenUri(uri) => m.open(Track::load(&uri)),
+                        Event::Pause => m.pause(),
+                        Event::Play => m.play(),
+                        Event::PlayPause => m.play_pause(),
+                        Event::SetVolume(v) => m.set_volume(v),
+                        Event::SetLoopStatus(s) => m.set_loop(s),
+                        Event::SetShuffleStatus(s) => m.set_shuffle(s),
+                        Event::SetPosition(p) => m.set_position(p),
+                        Event::Seek(f, s) => m.seek(f, s),
+                        Event::Stop => m.stop(),
+                        Event::Next => m.next().unwrap_or(()),
+                        Event::Previous => m.previous().unwrap_or(()),
+                        Event::Raise | Event::Quit => (),
+                    }
+                }
+
+                // Stop status after track has finished
+                #[allow(clippy::float_cmp)]
+                if m.get_position().2 == 1. {
+                    m.metadata.lock().unwrap().playback_status = PlaybackStatus::Stopped;
+                    m.next();
+                    m.update();
+                }
+                std::mem::drop(m);
+                // Wait before next loop
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
 }

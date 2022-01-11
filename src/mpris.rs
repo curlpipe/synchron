@@ -1,5 +1,5 @@
 // mpris.rs - handling mpris interactions
-use crate::audio::{LoopStatus, Metadata};
+use crate::audio::{LoopStatus, Metadata, Tag};
 use dbus::arg::{RefArg, Variant};
 use dbus::blocking::Connection;
 use dbus::channel::MatchingReceiver;
@@ -8,7 +8,6 @@ use dbus::message::SignalArgs;
 use dbus::strings::Path as DbusPath;
 use dbus::MethodErr;
 use dbus_crossroads::{Crossroads, IfaceBuilder};
-use id3::Tag;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -240,21 +239,9 @@ pub fn register(b: &mut IfaceBuilder<()>, ev: &EventHandler, name: &'static str,
 fn mpris_metadata(tag: &Tag) -> HashMap<String, Variant<Box<dyn RefArg>>> {
     // Create a hashmap of id3 tags for mpris
     let mut md: HashMap<String, Variant<Box<dyn RefArg>>> = HashMap::new();
-    add_prop!(
-        md,
-        "xesam:title",
-        tag.title().unwrap_or("[unknown]").to_string()
-    );
-    add_prop!(
-        md,
-        "xesam:album",
-        tag.album().unwrap_or("[unknown]").to_string()
-    );
-    add_prop!(
-        md,
-        "xesam:artist",
-        tag.artist().unwrap_or("[unknown]").to_string()
-    );
-    add_prop!(md, "xesam:year", tag.year().unwrap_or(0).to_string());
+    add_prop!(md, "xesam:title", tag.title.clone());
+    add_prop!(md, "xesam:album", tag.album.clone());
+    add_prop!(md, "xesam:artist", tag.artist.clone());
+    add_prop!(md, "xesam:year", tag.year.clone());
     md
 }
