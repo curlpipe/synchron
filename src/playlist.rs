@@ -4,40 +4,45 @@ use crate::Track;
 #[derive(Default)]
 pub struct PlayList {
     tracks: Vec<Track>,
+    ids: Vec<usize>,
     ptr: usize,
 }
 
 impl PlayList {
-    pub fn queue(&mut self, track: Track) {
+    pub fn queue(&mut self, track: Track, id: usize) {
         // Add song onto the end of the playlist
         self.tracks.push(track);
+        self.ids.push(id);
     }
 
-    pub fn queue_next(&mut self, track: Track) {
+    pub fn queue_next(&mut self, track: Track, id: usize) {
         // Add song to play immediately after the current one
         self.tracks.insert(self.ptr + 1, track);
+        self.ids.insert(self.ptr + 1, id);
     }
 
-    pub fn play(&mut self, track: Track) -> Option<Track> {
+    pub fn play(&mut self, track: Track, id: usize) -> Option<Track> {
         // Immediately add song and start playing it
         if self.tracks.is_empty() {
-            self.queue(track);
+            self.queue(track, id);
             self.current()
         } else {
-            self.queue_next(track);
+            self.queue_next(track, id);
             self.next()
         }
     }
 
-    pub fn set(&mut self, ptr: usize, tracks: Vec<Track>) {
+    pub fn set(&mut self, ptr: usize, tracks: Vec<Track>, ids: Vec<usize>) {
         // Insert a custom playlist to use, as well as an index to start from
         self.ptr = ptr;
         self.tracks = tracks;
+        self.ids = ids;
     }
 
     pub fn clear(&mut self) {
         // Clear the playlist
         self.tracks.clear();
+        self.ids.clear();
         self.ptr = 0;
     }
 
@@ -61,7 +66,12 @@ impl PlayList {
         }
     }
 
-    pub fn current(&mut self) -> Option<Track> {
+    pub fn current_id(&self) -> Option<usize> {
+        // Get the currently playing track ID
+        Some(*self.ids.get(self.ptr)?)
+    }
+
+    pub fn current(&self) -> Option<Track> {
         // Get the currently playing track
         Some(self.tracks.get(self.ptr)?.clone())
     }
@@ -69,17 +79,20 @@ impl PlayList {
     pub fn move_down(&mut self, ptr: usize) {
         // Move a particular track downwards
         self.tracks.swap(ptr, ptr + 1);
+        self.ids.swap(ptr, ptr + 1);
     }
 
     pub fn move_up(&mut self, ptr: usize) {
         // Move a particular track upwards
         self.tracks.swap(ptr, ptr.saturating_sub(1));
+        self.ids.swap(ptr, ptr.saturating_sub(1));
     }
 
     pub fn move_next(&mut self, ptr: usize) {
         // Move a particular song in this queue to play next
         let track = self.tracks.remove(ptr);
-        self.queue_next(track);
+        let id = self.ids.remove(ptr);
+        self.queue_next(track, id);
     }
 
     pub fn view(&mut self) -> String {

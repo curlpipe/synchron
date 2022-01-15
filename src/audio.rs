@@ -19,6 +19,16 @@ pub enum PlaybackStatus {
     Stopped,
 }
 
+impl PlaybackStatus {
+    pub fn icon(&self) -> &str {
+        match self {
+            Self::Playing => "契",
+            Self::Paused => " ",
+            Self::Stopped => "栗",
+        }
+    }
+}
+
 // Represents loop status
 #[derive(Debug, Clone, Copy)]
 pub enum LoopStatus {
@@ -34,19 +44,21 @@ pub struct Metadata {
     pub loop_status: LoopStatus,
     pub shuffle_status: bool,
     pub volume: f64,
-    pub position: i64,
+    pub position: (u64, u64, f64),
     pub tag: Tag,
 }
 
 // Main manager struct that handles everything
 pub struct Manager {
-    player: Player,
+    pub player: Player,
     pub playlist: PlayList,
     pub metadata: Arc<Mutex<Metadata>>,
     pub update_transmit: Sender<()>,
     pub mpris: Receiver<crate::mpris::Event>,
     pub config: Config,
     pub database: Database,
+    // TODO: Replace use of channels with mutexes on this variable.
+    pub updated: bool,
 }
 
 impl Manager {
@@ -71,7 +83,7 @@ impl Manager {
                 loop_status: LoopStatus::None,
                 shuffle_status: false,
                 volume: 1.0,
-                position: 0,
+                position: (0, 0, 0.0),
                 tag: Tag::default(),
             })),
             // Add in mpris information channels
@@ -80,6 +92,8 @@ impl Manager {
             // Load in config file and library database
             config: Config::open(),
             database: Database::open(),
+            // Updated flag for UI
+            updated: false,
         }
     }
 
@@ -123,9 +137,10 @@ impl Manager {
             let mut md = self.metadata.lock().unwrap();
             md.playback_status = PlaybackStatus::Stopped;
             md.tag = track.tag.clone();
-            self.playlist.play(track.clone());
+            self.playlist.play(track.clone(), id);
             self.player
                 .set_uri(self.playlist.current().unwrap().path.as_str());
+            std::mem::drop(md);
             self.update();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
@@ -140,7 +155,7 @@ impl Manager {
             for id in load {
                 playlist.push(self.database.tracks[id].clone());
             }
-            self.playlist.set(0, playlist);
+            self.playlist.set(0, playlist, load.to_vec());
             md.playback_status = PlaybackStatus::Stopped;
             if self.playlist.is_empty() {
                 md.tag = Tag::default();
@@ -150,6 +165,7 @@ impl Manager {
                 self.player
                     .set_uri(self.playlist.current().unwrap().path.as_str());
             }
+            std::mem::drop(md);
             self.update();
         } else {
             println!("ERROR: Couldn't find playlist: {}", playlist);
@@ -228,7 +244,7 @@ impl Manager {
     pub fn queue(&mut self, id: usize) {
         // Queue a track
         if let Some(track) = self.database.tracks.get(&id) {
-            self.playlist.queue(track.clone());
+            self.playlist.queue(track.clone(), id);
         }
     }
 
@@ -242,9 +258,12 @@ impl Manager {
         // Play the current track
         if !self.playlist.is_empty() {
             let mut md = self.metadata.lock().unwrap();
+            if md.playback_status == PlaybackStatus::Stopped {
+                self.player.stop();
+            }
             md.playback_status = PlaybackStatus::Playing;
-            self.player.stop();
             self.player.play();
+            std::mem::drop(md);
             self.update();
         }
     }
@@ -254,6 +273,7 @@ impl Manager {
         let mut md = self.metadata.lock().unwrap();
         md.playback_status = PlaybackStatus::Paused;
         self.player.pause();
+        std::mem::drop(md);
         self.update();
     }
 
@@ -271,6 +291,7 @@ impl Manager {
         let mut md = self.metadata.lock().unwrap();
         md.playback_status = PlaybackStatus::Stopped;
         self.player.stop();
+        std::mem::drop(md);
         self.update();
     }
 
@@ -298,6 +319,19 @@ impl Manager {
         // Set the loop status
         let mut md = self.metadata.lock().unwrap();
         md.loop_status = s;
+        std::mem::drop(md);
+        self.update();
+    }
+
+    pub fn cycle_loop(&mut self) {
+        // Cycle through the loop statuses
+        let mut md = self.metadata.lock().unwrap();
+        md.loop_status = match md.loop_status {
+            LoopStatus::None => LoopStatus::Track,
+            LoopStatus::Track => LoopStatus::Playlist,
+            LoopStatus::Playlist => LoopStatus::None,
+        };
+        std::mem::drop(md);
         self.update();
     }
 
@@ -305,57 +339,83 @@ impl Manager {
         // Set the shuffle status
         let mut md = self.metadata.lock().unwrap();
         md.shuffle_status = s;
+        std::mem::drop(md);
+        self.update();
+    }
+
+    pub fn cycle_shuffle(&mut self) {
+        // Toggle the shuffle option
+        let mut md = self.metadata.lock().unwrap();
+        md.shuffle_status = !md.shuffle_status;
+        std::mem::drop(md);
         self.update();
     }
 
     pub fn seek(&mut self, forwards: bool, s: Duration) {
         // Perform a seek operation
-        let (mut position, duration, _) = self.get_position();
-        position = if forwards {
-            position + s.as_secs()
-        } else {
-            position.saturating_sub(s.as_secs())
-        };
-        if position > duration {
-            position = duration;
+        if self.metadata.lock().unwrap().playback_status != PlaybackStatus::Stopped {
+            // Player is not stopped and ready to be seeked
+            if let Some((mut position, duration, _)) = self.get_position() {
+                // Update position
+                position = if forwards {
+                    position + s.as_secs()
+                } else {
+                    position.saturating_sub(s.as_secs())
+                };
+                if position > duration {
+                    position = duration;
+                }
+                self.player.seek(ClockTime::from_seconds(position));
+            }
         }
-        self.player.seek(ClockTime::from_seconds(position));
     }
 
     pub fn set_volume(&mut self, v: f64) {
         // Set the volume of the player
-        let mut md = self.metadata.lock().unwrap();
-        md.volume = v;
-        self.player.set_volume(v);
+        if v >= 0.0 {
+            let mut md = self.metadata.lock().unwrap();
+            md.volume = v;
+            self.player.set_volume(v);
+            std::mem::drop(md);
+            self.update();
+        }
+    }
+
+    pub fn toggle_mute(&mut self) {
+        // Toggle the mute option
+        let md = self.metadata.lock().unwrap();
+        if self.player.volume() == 0.0 {
+            self.player.set_volume(md.volume);
+        } else {
+            self.player.set_volume(0.0);
+        }
+        std::mem::drop(md);
         self.update();
     }
 
     pub fn set_position(&mut self, p: i64) {
         // Set the position of the player
-        let (_, duration, _) = self.get_position();
-        let p = p.try_into().unwrap();
-        if p > duration {
-            return;
+        if let Some((_, duration, _)) = self.get_position() {
+            let p = p.try_into().unwrap();
+            if p > duration {
+                return;
+            }
+            self.player.seek(ClockTime::from_seconds(p));
         }
-        self.player.seek(ClockTime::from_seconds(p));
     }
 
     #[allow(clippy::cast_precision_loss)]
-    pub fn get_position(&self) -> (u64, u64, f64) {
+    pub fn get_position(&self) -> Option<(u64, u64, f64)> {
         // Work out the current position of the player
-        let time_pos = match self.player.position() {
-            Some(t) => ClockTime::seconds(t),
-            None => 0_u64,
-        };
-        // Update the position for mpris to read
-        self.metadata.lock().unwrap().position = time_pos.try_into().unwrap_or(0);
+        let time_pos = ClockTime::seconds(self.player.position()?);
         // Work out the duration of the current track
-        let duration = match self.player.duration() {
-            Some(d) => ClockTime::seconds(d),
-            None => 0_u64,
-        };
-        // Return above values, and calculate the percentage way through
-        (time_pos, duration, time_pos as f64 / (duration as f64))
+        let duration = ClockTime::seconds(self.player.duration()?);
+        // Tupleize above values, and calculate the percentage way through
+        let data = (time_pos, duration, time_pos as f64 / (duration as f64));
+        // Update the position for mpris to read
+        self.metadata.lock().unwrap().position = data;
+        // Return formed values
+        Some(data)
     }
 
     pub fn list_library(&self) -> String {
@@ -457,8 +517,9 @@ impl Manager {
         }
     }
 
-    pub fn update(&self) {
+    pub fn update(&mut self) {
         // Send the update signal for mpris to update it's values
+        self.updated = true;
         self.update_transmit.send(()).unwrap();
     }
 }

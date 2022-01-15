@@ -4,8 +4,13 @@ use crate::util::{attempt_open, expand_path};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+// Default configuration and database formats
 const DEFAULT_CONFIG: &str = include_str!("../synchron.ron");
 const DEFAULT_DATABASE: &str = include_str!("../database.ron");
+// Thread pulse time for rendering, and dbus actions.
+// Lower = Quicker reaction times, worse performance
+// Higher = Slower reaction times, better performance
+pub const PULSE: u64 = 200;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Config {

@@ -9,6 +9,8 @@
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::cast_sign_loss)]
 
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[macro_use]
 mod util;
 mod audio;
@@ -16,15 +18,56 @@ mod config;
 mod mpris;
 mod playlist;
 mod track;
+mod ui;
 
 use audio::{LoopStatus, Manager, PlaybackStatus};
+use config::PULSE;
+use jargon_args::Jargon;
 use mpris::Event;
 use scanln::scanln;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use track::Track;
+use ui::Ui;
+use util::HELP;
 
 fn main() {
+    // Parse command line arguments
+    let mut args = Jargon::from_env();
+    // Handle help and version message
+    if args.contains(["-h", "--help"]) {
+        println!("{}", HELP);
+        std::process::exit(0);
+    } else if args.contains(["-V", "--version"]) {
+        println!("v{}", VERSION);
+        std::process::exit(0);
+    }
+    // Start into the correct mode
+    if args.contains(["-c", "--cli"]) {
+        start_cli();
+    } else {
+        start_tui();
+    }
+}
+
+fn start_tui() {
+    // Build and initialise a manager
+    let mut m = Manager::new();
+    m.init();
+    // Allow for it to be accessed from threads
+    let m = Arc::new(Mutex::new(m));
+    // Start mpris event loop
+    spawn_mpris(&m);
+    // Initiate a text user interface
+    if let Ok(mut ui) = Ui::new(m) {
+        // Initiate UI lifecycle
+        ui.init().ok();
+        ui.run().ok();
+        ui.clean().ok();
+    }
+}
+
+fn start_cli() {
     // Build and initialise a manager
     let mut m = Manager::new();
     m.init();
@@ -67,7 +110,7 @@ fn main() {
             ["prev"] => m.previous().unwrap_or(()),
             // Metadata
             ["status"] => {
-                let (p, d, pr) = m.get_position();
+                let (p, d, pr) = m.get_position().unwrap_or((0, 0, 0.0));
                 println!("{}s / {}s ({:.2}%)\n", p, d, pr * 100.);
                 print!("{}", m.playlist.view());
             }
@@ -107,7 +150,7 @@ fn main() {
             // Position controls
             ["position", "set", p] => m.set_position(p.parse().unwrap_or(-1)),
             ["position", "get"] => {
-                let (p, d, pr) = m.get_position();
+                let (p, d, pr) = m.get_position().unwrap_or((0, 0, 0.0));
                 println!("{}s / {}s ({:.2}%)", p, d, pr * 100.);
             }
             ["seek", "backward"] => m.seek(false, Duration::from_secs(5)),
@@ -150,14 +193,14 @@ fn spawn_mpris(m: &Arc<Mutex<Manager>>) {
 
                 // Stop status after track has finished
                 #[allow(clippy::float_cmp)]
-                if m.get_position().2 == 1. {
+                if m.get_position().unwrap_or((0, 0, 0.0)).2 == 1. {
                     m.metadata.lock().unwrap().playback_status = PlaybackStatus::Stopped;
                     m.next();
                     m.update();
                 }
                 std::mem::drop(m);
                 // Wait before next loop
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(PULSE));
             }
         }
     });

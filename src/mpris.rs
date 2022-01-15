@@ -1,5 +1,6 @@
 // mpris.rs - handling mpris interactions
 use crate::audio::{LoopStatus, Metadata};
+use crate::config::PULSE;
 use crate::track::Tag;
 use dbus::arg::{RefArg, Variant};
 use dbus::blocking::Connection;
@@ -117,7 +118,7 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
         // Get the position status from the metadata
         b.property("Position").get({
             let md = player_md.clone();
-            move |_, _| -> Result<i64, MethodErr> { Ok(md.lock().unwrap().position) }
+            move |_, _| -> Result<i64, MethodErr> { Ok(md.lock().unwrap().position.0 as i64) }
         });
         b.property("Volume")
             .get({
@@ -191,8 +192,6 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
     );
     // Start server loop
     loop {
-        c.process(std::time::Duration::from_millis(100)).unwrap();
-
         if update.try_recv().is_ok() {
             // When an update event is received, update information in the player
             let m = md.lock().unwrap();
@@ -225,6 +224,8 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
                 ))
                 .unwrap();
         }
+        // Wait before checking again
+        c.process(std::time::Duration::from_millis(PULSE)).unwrap();
     }
 }
 

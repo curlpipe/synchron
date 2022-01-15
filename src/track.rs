@@ -1,5 +1,6 @@
 // track.rs - for managing track related activities
 use crate::util::expand_path;
+use id3::Version;
 use serde::{Deserialize, Serialize};
 
 // For holding tag information
@@ -60,8 +61,9 @@ impl Track {
         let path = Track::format_path(&self.path);
         if let Ok(mut tag) = id3::Tag::read_from_path(&path) {
             tag.set_title(title);
+            self.tag.title = title.to_string();
+            tag.write_to_path(path, Version::Id3v24).ok();
         }
-        self.tag.title = title.to_string();
     }
 
     pub fn set_album(&mut self, album: &str) {
@@ -69,8 +71,9 @@ impl Track {
         let path = Track::format_path(&self.path);
         if let Ok(mut tag) = id3::Tag::read_from_path(&path) {
             tag.set_album(album);
+            self.tag.album = album.to_string();
+            tag.write_to_path(path, Version::Id3v24).ok();
         }
-        self.tag.album = album.to_string();
     }
 
     pub fn set_artist(&mut self, artist: &str) {
@@ -78,8 +81,9 @@ impl Track {
         let path = Track::format_path(&self.path);
         if let Ok(mut tag) = id3::Tag::read_from_path(&path) {
             tag.set_artist(artist);
+            self.tag.artist = artist.to_string();
+            tag.write_to_path(path, Version::Id3v24).ok();
         }
-        self.tag.artist = artist.to_string();
     }
 
     pub fn set_year(&mut self, year: &str) {
@@ -87,8 +91,9 @@ impl Track {
         let path = Track::format_path(&self.path);
         if let Ok(mut tag) = id3::Tag::read_from_path(&path) {
             tag.set_year(year.parse().unwrap_or(0));
+            self.tag.year = year.to_string();
+            tag.write_to_path(path, Version::Id3v24).ok();
         }
-        self.tag.year = year.to_string();
     }
 
     pub fn update(&mut self) {
@@ -103,15 +108,19 @@ impl Track {
         path.trim_start_matches("file://").to_string()
     }
 
-    pub fn format(&self) -> String {
+    pub fn format_elements(&self) -> (String, &String, &String, &String, &String) {
         let tag = &self.tag;
-        format!(
-            "{} | {} | {} | {} | {}",
+        (
             Track::format_path(&self.path),
-            tag.title,
-            tag.album,
-            tag.artist,
-            tag.year
+            &tag.title,
+            &tag.album,
+            &tag.artist,
+            &tag.year,
         )
+    }
+
+    pub fn format(&self) -> String {
+        let (path, title, album, artist, year) = self.format_elements();
+        format!("{} | {} | {} | {} | {}", path, title, album, artist, year)
     }
 }
