@@ -13,8 +13,17 @@ const DEFAULT_DATABASE: &str = include_str!("../database.ron");
 pub const PULSE: u64 = 200;
 
 #[derive(Debug, Deserialize, Serialize)]
+pub enum Pane {
+    SimpleLibrary,
+    Empty,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub prompt: String,
+    pub panes: HashMap<u8, Pane>,
+    pub open_on_pane: u8,
+    pub indicators: HashMap<String, String>,
 }
 
 impl Config {

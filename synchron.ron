@@ -6,6 +6,37 @@
 */
 
 (
-    // This is the prompt that will be shown in the command line interface
+    // Prompt text in CLI mode
     prompt: "> ",
+
+    // Panes are modes that you can use
+    // Modes can be triggered by pressing the corresponding number key as listed below (e.g. 1 to go to SimpleLibrary)
+    // Feel free to rearrange, delete and add new modes to customise your set up.
+    panes: {
+        // SimpleLibrary: A single list of all your music. Ideal for updating tags and playing all your music.
+        1: SimpleLibrary,
+        // Empty: An empty pane for demonstration purposes
+        2: Empty,
+    },
+
+    // The pane number to start on when opening synchron
+    open_on_pane: 1,
+
+    // Indicators / Icons for the TUI
+    indicators: {
+        "loop_none": "稜",
+        "loop_track": "綾",
+        "loop_playlist": "凌",
+        "shuffle_on": "列",
+        "shuffle_off": "劣",
+        "volume_mute": "ﱝ ",
+        "volume_low": "奄",
+        "volume_medium": "奔",
+        "volume_high": "墳",
+        "playing": "契",
+        "paused": " ",
+        "stopped": "栗",
+        "progress_bar_full": "",
+        "progress_bar_empty": " ",
+    }
 )

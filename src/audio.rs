@@ -19,16 +19,6 @@ pub enum PlaybackStatus {
     Stopped,
 }
 
-impl PlaybackStatus {
-    pub fn icon(&self) -> &str {
-        match self {
-            Self::Playing => "契",
-            Self::Paused => " ",
-            Self::Stopped => "栗",
-        }
-    }
-}
-
 // Represents loop status
 #[derive(Debug, Clone, Copy)]
 pub enum LoopStatus {
@@ -155,7 +145,7 @@ impl Manager {
             for id in load {
                 playlist.push(self.database.tracks[id].clone());
             }
-            self.playlist.set(0, playlist, load.to_vec());
+            self.playlist.set(0, playlist, load.clone());
             md.playback_status = PlaybackStatus::Stopped;
             if self.playlist.is_empty() {
                 md.tag = Tag::default();

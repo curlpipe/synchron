@@ -1,7 +1,7 @@
 // util.rs - common utilities for helping out around the project
 use crate::track::Track;
-use unicode_width::UnicodeWidthStr;
 use std::collections::HashMap;
+use unicode_width::UnicodeWidthStr;
 
 // Help text
 pub const HELP: &str = "Synchron:
@@ -65,9 +65,9 @@ pub fn pad_table(table: Vec<Vec<String>>, limit: usize) -> Vec<String> {
             let gap = total / inner;
             let mut left_over = total % inner;
             let mut gaps = [gap, gap, gap];
-            for i in 0..2 {
+            for i in gaps.iter_mut().take(2) {
                 if left_over != 0 {
-                    gaps[i] += 1;
+                    *i += 1;
                     left_over -= 1;
                 }
             }
@@ -92,9 +92,8 @@ pub fn pad_table(table: Vec<Vec<String>>, limit: usize) -> Vec<String> {
     } else {
         // Recalculate padding with new column amount (rely on recursion)
         result = match table[0].len() {
-            4 => pad_table(remove_column(table, 1), limit),
+            4 | 2 => pad_table(remove_column(table, 1), limit),
             3 => pad_table(remove_column(table, 2), limit),
-            2 => pad_table(remove_column(table, 1), limit),
             1 => (0..table.len()).map(|_| "...".to_string()).collect(),
             _ => vec![],
         }
@@ -110,17 +109,18 @@ pub fn remove_column(mut table: Vec<Vec<String>>, column: usize) -> Vec<Vec<Stri
     table
 }
 
-pub fn format_table(tracks: Vec<&Track>) -> Vec<Vec<String>> {
+pub fn format_table(tracks: &[&Track]) -> Vec<Vec<String>> {
     // Format a list of tracks into a table
     let mut result = vec![];
     let tracks: Vec<(String, &String, &String, &String, &String)> =
         tracks.iter().map(|x| x.format_elements()).collect();
-    let mut columns: Vec<Vec<&String>> = vec![];
     // Sort into columns
-    columns.push(tracks.iter().map(|x| x.1).collect());
-    columns.push(tracks.iter().map(|x| x.2).collect());
-    columns.push(tracks.iter().map(|x| x.3).collect());
-    columns.push(tracks.iter().map(|x| x.4).collect());
+    let columns: Vec<Vec<&String>> = vec![
+        tracks.iter().map(|x| x.1).collect(),
+        tracks.iter().map(|x| x.2).collect(),
+        tracks.iter().map(|x| x.3).collect(),
+        tracks.iter().map(|x| x.4).collect(),
+    ];
     // Find the longest item in each column
     let mut limits = vec![];
     for column in &columns {
@@ -138,7 +138,7 @@ pub fn format_table(tracks: Vec<&Track>) -> Vec<Vec<String>> {
     result
 }
 
-pub fn find_longest(target: &Vec<&String>) -> usize {
+pub fn find_longest(target: &[&String]) -> usize {
     // Find the longest string in a vector
     let mut longest = 0;
     for i in target {

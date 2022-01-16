@@ -1,16 +1,17 @@
 // ui.rs - controls and renders the TUI
 use crate::audio::{LoopStatus, Manager, PlaybackStatus};
-use crate::config::PULSE;
+use crate::config::{Pane, PULSE};
 use crate::track::Track;
-use crate::util::{align_sides, format_table, pad_table, track_list_display, timefmt};
+use crate::util::{align_sides, format_table, pad_table, timefmt, track_list_display};
 pub use crossterm::{
     cursor,
     event::{self, Event, KeyCode as KCode, KeyEvent, KeyModifiers as KMod},
     execute, queue,
-    style::{self, Print, SetForegroundColor as SetFg, SetBackgroundColor as SetBg, Color},
+    style::{self, Color, Print, SetBackgroundColor as SetBg, SetForegroundColor as SetFg},
     terminal::{self, ClearType},
     Command, Result,
 };
+use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -28,6 +29,7 @@ impl Size {
     }
 }
 
+#[derive(PartialEq)]
 pub enum State {
     Library { selection: usize },
     Empty,
@@ -35,27 +37,42 @@ pub enum State {
 
 impl State {
     pub fn is_library(&self) -> bool {
-        match self {
-            Self::Library { .. } => true,
-            _ => false,
-        }
+        matches!(self, Self::Library { .. })
     }
 }
 
 pub struct Ui {
     stdout: std::io::Stdout,
     mgmt: Arc<Mutex<Manager>>,
-    state: State,
+    states: HashMap<u8, State>,
+    ptr: u8,
     size: Size,
     active: bool,
 }
 
 impl Ui {
     pub fn new(m: Arc<Mutex<Manager>>) -> Result<Self> {
+        // Create new UI
+        let mgmt = m.lock().unwrap();
+        // Set up states
+        let mut states = HashMap::default();
+        for (key, pane) in &mgmt.config.panes {
+            states.insert(
+                *key,
+                match pane {
+                    Pane::SimpleLibrary => State::Library { selection: 0 },
+                    Pane::Empty => State::Empty,
+                },
+            );
+        }
+        let ptr = mgmt.config.open_on_pane;
+        std::mem::drop(mgmt);
+        // Form struct
         Ok(Self {
             stdout: std::io::stdout(),
             mgmt: m,
-            state: State::Library { selection: 0 },
+            states,
+            ptr,
             size: Size::screen()?,
             active: true,
         })
@@ -85,7 +102,7 @@ impl Ui {
         while self.active {
             if event::poll(std::time::Duration::from_millis(PULSE))? {
                 match event::read()? {
-                    Event::Key(k) => self.on_key(k)?,
+                    Event::Key(k) => self.on_key(k),
                     Event::Resize(width, height) => {
                         self.size = Size { width, height };
                         self.render()?;
@@ -98,7 +115,16 @@ impl Ui {
                 self.render()?;
             }
             // Rerender the status line if playing, to keep up with the position of the song
-            if self.mgmt.lock().unwrap().metadata.lock().unwrap().playback_status == PlaybackStatus::Playing {
+            if self
+                .mgmt
+                .lock()
+                .unwrap()
+                .metadata
+                .lock()
+                .unwrap()
+                .playback_status
+                == PlaybackStatus::Playing
+            {
                 let status_idx = self.size.height.saturating_sub(1);
                 queue!(
                     self.stdout,
@@ -112,9 +138,20 @@ impl Ui {
         Ok(())
     }
 
-    pub fn on_key(&mut self, e: KeyEvent) -> Result<()> {
+    pub fn on_key(&mut self, e: KeyEvent) {
         // Handle key event
         match (e.modifiers, e.code) {
+            // Mode switching
+            (KMod::NONE, KCode::Char('0')) => self.switch_mode(0),
+            (KMod::NONE, KCode::Char('1')) => self.switch_mode(1),
+            (KMod::NONE, KCode::Char('2')) => self.switch_mode(2),
+            (KMod::NONE, KCode::Char('3')) => self.switch_mode(3),
+            (KMod::NONE, KCode::Char('4')) => self.switch_mode(4),
+            (KMod::NONE, KCode::Char('5')) => self.switch_mode(5),
+            (KMod::NONE, KCode::Char('6')) => self.switch_mode(6),
+            (KMod::NONE, KCode::Char('7')) => self.switch_mode(7),
+            (KMod::NONE, KCode::Char('8')) => self.switch_mode(8),
+            (KMod::NONE, KCode::Char('9')) => self.switch_mode(9),
             // [q] : Quit
             (KMod::NONE, KCode::Char('q')) => self.active = false,
             // [t] : Toggle playback
@@ -136,9 +173,15 @@ impl Ui {
             // [Ctrl] + [/\] : Move selection to bottom of library
             (KMod::CONTROL, KCode::Down) => self.selection_bottom(),
             // [<] : Seek backward 5 seconds
-            (KMod::NONE, KCode::Left) => self.mgmt.lock().unwrap().seek(false, Duration::from_secs(5)),
+            (KMod::NONE, KCode::Left) => self
+                .mgmt
+                .lock()
+                .unwrap()
+                .seek(false, Duration::from_secs(5)),
             // [>] : Seek forward 5 seconds
-            (KMod::NONE, KCode::Right) => self.mgmt.lock().unwrap().seek(true, Duration::from_secs(5)),
+            (KMod::NONE, KCode::Right) => {
+                self.mgmt.lock().unwrap().seek(true, Duration::from_secs(5));
+            }
             // [Ctrl] + [<] : Previous track
             (KMod::CONTROL, KCode::Left) => self.mgmt.lock().unwrap().previous().unwrap_or(()),
             // [Ctrl] + [>] : Next track
@@ -164,15 +207,29 @@ impl Ui {
             // [???] : Do nothing
             _ => (),
         }
-        Ok(())
+    }
+
+    fn switch_mode(&mut self, mode: u8) {
+        // Switch modes
+        if self.states.contains_key(&mode) {
+            self.ptr = mode;
+        }
+    }
+
+    fn state(&self) -> &State {
+        self.states.get(&self.ptr).unwrap()
+    }
+
+    fn state_mut(&mut self) -> &mut State {
+        self.states.get_mut(&self.ptr).unwrap()
     }
 
     fn select(&mut self) {
         // Play the selected track
-        if let State::Library { selection } = self.state {
+        if let State::Library { selection } = self.state() {
             let mut mgmt = self.mgmt.lock().unwrap();
             let lookup = track_list_display(&mgmt.database.tracks);
-            let id = lookup[selection];
+            let id = lookup[*selection];
             mgmt.load(id);
             mgmt.play();
         }
@@ -180,7 +237,7 @@ impl Ui {
 
     fn selection_up(&mut self) {
         // Move the current selection down
-        if let State::Library { selection } = &mut self.state {
+        if let State::Library { selection } = self.state_mut() {
             if *selection > 0 {
                 *selection -= 1;
             }
@@ -189,8 +246,9 @@ impl Ui {
 
     fn selection_down(&mut self) {
         // Move the current selection down
-        if let State::Library { selection } = &mut self.state {
-            if *selection + 1 < self.mgmt.lock().unwrap().database.tracks.len() {
+        let tracks = self.mgmt.lock().unwrap().database.tracks.len();
+        if let State::Library { selection } = self.state_mut() {
+            if *selection + 1 < tracks {
                 *selection += 1;
             }
         }
@@ -198,15 +256,16 @@ impl Ui {
 
     fn selection_top(&mut self) {
         // Move the selection to the top of the library
-        if let State::Library { selection } = &mut self.state {
+        if let State::Library { selection } = self.state_mut() {
             *selection = 0;
         }
     }
 
     fn selection_bottom(&mut self) {
         // Move the selection to the top of the library
-        if let State::Library { selection } = &mut self.state {
-            *selection = track_list_display(&self.mgmt.lock().unwrap().database.tracks).len().saturating_sub(1);
+        let tracks = self.mgmt.lock().unwrap().database.tracks.len();
+        if let State::Library { selection } = self.state_mut() {
+            *selection = tracks.saturating_sub(1);
         }
     }
 
@@ -216,27 +275,28 @@ impl Ui {
         // Get list of tracks
         // NOTE: Make sure to "if" this when more states are added for optimisation
         let keys = track_list_display(&mgmt.database.tracks);
-        let tracks: Vec<&Track> = keys
-            .iter()
-            .map(|x| &mgmt.database.tracks[x])
-            .collect();
-        let table = pad_table(format_table(tracks), self.size.width as usize);
+        let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
+        let table = pad_table(format_table(&tracks), self.size.width as usize);
         std::mem::drop(mgmt);
         // Do render
         for line in 0..self.size.height {
             // Go to line and clear it
-            queue!(self.stdout, cursor::MoveTo(0, line), terminal::Clear(ClearType::CurrentLine))?;
+            queue!(
+                self.stdout,
+                cursor::MoveTo(0, line),
+                terminal::Clear(ClearType::CurrentLine)
+            )?;
             // Do maths
             let status_idx = self.size.height.saturating_sub(1);
             // Determine what to render on this line
-            if line != status_idx && self.state.is_library() {
+            if line != status_idx && self.state().is_library() {
                 queue!(self.stdout, terminal::Clear(ClearType::CurrentLine))?;
                 // Acquire manager
                 let mgmt = self.mgmt.lock().unwrap();
                 // Render library view
-                if let State::Library { selection } = self.state {
+                if let State::Library { selection } = self.state() {
                     if let Some(row) = table.get(line as usize) {
-                        let is_selected = selection == line.into();
+                        let is_selected = *selection == line.into();
                         let is_playing = mgmt.playlist.current_id() == Some(keys[line as usize]);
                         // Set up formatting for list
                         if is_selected {
@@ -264,8 +324,12 @@ impl Ui {
         let mgmt = self.mgmt.lock().unwrap();
         // Form left hand side
         let lhs = if let Some(current) = mgmt.playlist.current() {
-            let icon = mgmt.metadata.lock().unwrap().playback_status;
-            let icon = icon.icon();
+            let pb = mgmt.metadata.lock().unwrap().playback_status;
+            let icon = match pb {
+                PlaybackStatus::Playing => &mgmt.config.indicators["playing"],
+                PlaybackStatus::Paused => &mgmt.config.indicators["paused"],
+                PlaybackStatus::Stopped => &mgmt.config.indicators["stopped"],
+            };
             format!("{}{} - {}", icon, current.tag.title, current.tag.artist)
         } else {
             "No track loaded".to_string()
@@ -273,22 +337,28 @@ impl Ui {
         // Obtain correct icons for current player state
         let md = mgmt.metadata.lock().unwrap();
         let loop_icon = match md.loop_status {
-            LoopStatus::None => "稜",
-            LoopStatus::Track => "綾",
-            LoopStatus::Playlist => "凌",
+            LoopStatus::None => &mgmt.config.indicators["loop_none"],
+            LoopStatus::Track => &mgmt.config.indicators["loop_track"],
+            LoopStatus::Playlist => &mgmt.config.indicators["loop_playlist"],
         };
-        let shuffle_icon = if md.shuffle_status { "列" } else { "劣" };
+        let shuffle_icon = &mgmt.config.indicators[if md.shuffle_status {
+            "shuffle_on"
+        } else {
+            "shuffle_off"
+        }];
+        #[allow(clippy::cast_possible_truncation)]
         let volume_icon = match (mgmt.player.volume() * 100.0) as u8 {
             // 0%: Mute icon
-            0 => "ﱝ ",
+            0 => &mgmt.config.indicators["volume_mute"],
             // < 30%: Low speaker icon
-            0..=30 => "奄",
+            1..=30 => &mgmt.config.indicators["volume_low"],
             // < 60%: Medium speaker icon
-            31..=60 => "奔",
+            31..=60 => &mgmt.config.indicators["volume_medium"],
             // < 100%: Full speaker icon
-            _ => "墳",
+            _ => &mgmt.config.indicators["volume_high"],
         };
         // Form right hand side
+        #[allow(clippy::cast_possible_truncation)]
         let volume = (md.volume * 100.0) as usize;
         std::mem::drop(md);
         let (position, duration, percent) = if let Some(data) = mgmt.get_position() {
@@ -296,17 +366,35 @@ impl Ui {
         } else {
             mgmt.metadata.lock().unwrap().position
         };
-        let rhs = format!("{}/{} {}% {} {} {}", timefmt(position), timefmt(duration), volume, volume_icon, loop_icon, shuffle_icon);
+        let rhs = format!(
+            "{}/{} {}% {} {} {}",
+            timefmt(position),
+            timefmt(duration),
+            volume,
+            volume_icon,
+            loop_icon,
+            shuffle_icon
+        );
         // Do alignment
         let space = align_sides(&lhs, &rhs, self.size.width as usize, 4).saturating_sub(4);
         if space > 3 {
             // Form progress bar
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
             let hl = ((space as f64 * percent) as usize).saturating_sub(1);
             let nohl = space - hl;
-            let progress = format!("|{}{}|", "".repeat(hl), " ".repeat(nohl));
+            let progress = format!(
+                "|{}{}|",
+                &mgmt.config.indicators["progress_bar_full"].repeat(hl),
+                &mgmt.config.indicators["progress_bar_empty"].repeat(nohl)
+            );
             // Put it all together and print it
             let status = format!("{} {} {}", lhs, progress, rhs);
-            queue!(self.stdout, SetFg(Color::DarkBlue), Print(status), SetFg(Color::Reset))?;
+            queue!(
+                self.stdout,
+                SetFg(Color::DarkBlue),
+                Print(status),
+                SetFg(Color::Reset)
+            )?;
         }
         Ok(())
     }
