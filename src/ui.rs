@@ -195,7 +195,9 @@ impl Ui {
             (KMod::NONE, KCode::Char('c')) => self.mgmt.lock().unwrap().play(),
             // [v] : Pause playback
             (KMod::NONE, KCode::Char('v')) => self.mgmt.lock().unwrap().pause(),
-            // [Enter] : Play selection
+            // [d] : Delete from library
+            (KMod::NONE, KCode::Char('d')) => self.remove(),
+            // [Enter] : Play selection / Add track to library
             (KMod::NONE, KCode::Enter) => self.select(),
             // [/\] : Move up selection in library
             (KMod::NONE, KCode::Up) => self.selection_up(),
@@ -205,6 +207,10 @@ impl Ui {
             (KMod::CONTROL, KCode::Up) => self.selection_top(),
             // [Ctrl] + [/\] : Move selection to bottom of library
             (KMod::CONTROL, KCode::Down) => self.selection_bottom(),
+            // [Alt] + [\/] : Move track downwards
+            (KMod::ALT, KCode::Up) => self.track_up(),
+            // [Alt] + [/\] : Move track upwards
+            (KMod::ALT, KCode::Down) => self.track_down(),
             // [<] : Seek backward 5 seconds
             (KMod::NONE, KCode::Left) => self
                 .mgmt
@@ -259,6 +265,16 @@ impl Ui {
         self.states.get_mut(&self.ptr).unwrap()
     }
 
+    fn remove(&mut self) {
+        // Remove from library
+        if let State::Library { selection } = self.state() {
+            let mut mgmt = self.mgmt.lock().unwrap();
+            let lookup = track_list_display(&mgmt.database.tracks);
+            let id = lookup[*selection];
+            mgmt.remove_library(id);
+        }
+    }
+
     fn select(&mut self) {
         // Play the selected track
         match self.state() {
@@ -291,6 +307,48 @@ impl Ui {
             }
             _ => (),
         }
+    }
+
+    fn track_up(&mut self) {
+        // Move track upwards
+        let mut mgmt = self.mgmt.lock().unwrap();
+        if let State::Library { selection } = self.state() {
+            if *selection != 0 {
+                let tracks = track_list_display(&mgmt.database.tracks);
+                // Get locations of selected track and track above
+                let select = tracks[*selection];
+                let above = tracks[selection - 1];
+                // Remove both
+                let above_this = mgmt.database.tracks.remove(&above).unwrap();
+                let this = mgmt.database.tracks.remove(&select).unwrap();
+                // Reinsert them, in a swapped order
+                mgmt.database.tracks.insert(select, above_this);
+                mgmt.database.tracks.insert(above, this);
+            }
+        }
+        mgmt.database.write();
+        std::mem::drop(mgmt);
+        self.selection_up();
+    }
+
+    fn track_down(&mut self) {
+        // Move track downwards
+        let mut mgmt = self.mgmt.lock().unwrap();
+        if let State::Library { selection } = self.state() {
+            if *selection < mgmt.database.tracks.len().saturating_sub(1) {
+                let tracks = track_list_display(&mgmt.database.tracks);
+                let selection = tracks[*selection];
+                let idx = selection + 1;
+                let below = tracks.get(idx).unwrap_or(&idx);
+                let below_this = mgmt.database.tracks.remove(&below).unwrap();
+                let this = mgmt.database.tracks.remove(&selection).unwrap();
+                mgmt.database.tracks.insert(selection, below_this);
+                mgmt.database.tracks.insert(*below, this);
+            }
+        }
+        mgmt.database.write();
+        std::mem::drop(mgmt);
+        self.selection_down();
     }
 
     fn selection_up(&mut self) {

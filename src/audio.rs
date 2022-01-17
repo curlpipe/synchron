@@ -428,6 +428,7 @@ impl Manager {
         for k in &keys {
             if i != *k {
                 result = Some(i);
+                break;
             }
             i += 1;
         }

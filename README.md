@@ -45,10 +45,13 @@ order to use synchron.
 | <kbd>c</kbd>                       | Start music playback.                     |
 | <kbd>v</kbd>                       | Pause music playback.                     |
 | <kbd>Enter</kbd>                   | Play selected track in library.           |
+| <kbd>d</kbd>                       | Delete selected track from library.       |
 | <kbd>Up</kbd>                      | Move selection up.                        |
 | <kbd>Down</kbd>                    | Move selection down.                      |
 | <kbd>Ctrl</kbd> + <kbd>Up</kbd>    | Move selection to top.                    |
 | <kbd>Ctrl</kbd> + <kbd>Down</kbd>  | Move selection to bottom.                 |
+| <kbd>Alt</kbd> + <kbd>Up</kbd>     | Move selected track in library upwards.   |
+| <kbd>Alt</kbd> + <kbd>Down</kbd>   | Move selected track in library downwards. |
 | <kbd>Left</kbd>                    | Seek forward 5 seconds.                   |
 | <kbd>Right</kbd>                   | Seek backward 5 seconds.                  |
 | <kbd>Ctrl</kbd> + <kbd>Right</kbd> | Move to the next track.                   |
@@ -61,6 +64,7 @@ order to use synchron.
 | <kbd>;</kbd> OR <kbd>:</kbd>       | Open command mode within TUI mode.        |
 | <kbd>1</kbd>                       | Go to simple library pane.                |
 | <kbd>2</kbd>                       | Go to empty pane.                         |
+| <kbd>4</kbd>                       | Go to file browser.                       |
 
 ## CLI mode commands
 | Command                     | What it does                                             |
