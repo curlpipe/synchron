@@ -118,7 +118,9 @@ pub fn connect(ev: EventHandler, md: &Arc<Mutex<Metadata>>, update: &mpsc::Recei
         // Get the position status from the metadata
         b.property("Position").get({
             let md = player_md.clone();
-            move |_, _| -> Result<i64, MethodErr> { Ok(md.lock().unwrap().position.0.try_into().unwrap()) }
+            move |_, _| -> Result<i64, MethodErr> {
+                Ok(md.lock().unwrap().position.0.try_into().unwrap())
+            }
         });
         b.property("Volume")
             .get({

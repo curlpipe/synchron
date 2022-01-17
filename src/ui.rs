@@ -2,7 +2,10 @@
 use crate::audio::{LoopStatus, Manager, PlaybackStatus};
 use crate::config::{Pane, PULSE};
 use crate::track::Track;
-use crate::util::{align_sides, format_table, pad_table, timefmt, track_list_display};
+use crate::util::{
+    align_sides, expand_path, format_table, is_file, list_dir, pad_table, timefmt,
+    track_list_display,
+};
 pub use crossterm::{
     cursor,
     event::{self, Event, KeyCode as KCode, KeyEvent, KeyModifiers as KMod},
@@ -15,6 +18,10 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+type OptionList = Option<Vec<String>>;
+type TrackList = (Option<Vec<usize>>, OptionList);
+type FileList = OptionList;
 
 pub struct Size {
     width: u16,
@@ -31,13 +38,32 @@ impl Size {
 
 #[derive(PartialEq)]
 pub enum State {
-    Library { selection: usize },
+    Library {
+        selection: usize,
+    },
+    Files {
+        selection: usize,
+        dir: String,
+        list: Vec<String>,
+    },
     Empty,
 }
 
 impl State {
     pub fn is_library(&self) -> bool {
         matches!(self, Self::Library { .. })
+    }
+
+    pub fn is_files(&self) -> bool {
+        matches!(self, Self::Files { .. })
+    }
+
+    pub fn get_selection(&self) -> usize {
+        match self {
+            Self::Library { selection } => *selection,
+            Self::Files { selection, .. } => *selection,
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -61,6 +87,14 @@ impl Ui {
                 *key,
                 match pane {
                     Pane::SimpleLibrary => State::Library { selection: 0 },
+                    Pane::Files => {
+                        let dir = expand_path("~/").unwrap_or_else(|| ".".to_string());
+                        State::Files {
+                            selection: 0,
+                            list: list_dir(&dir, !mgmt.config.show_hidden_files),
+                            dir,
+                        }
+                    }
                     Pane::Empty => State::Empty,
                 },
             );
@@ -115,16 +149,15 @@ impl Ui {
                 self.render()?;
             }
             // Rerender the status line if playing, to keep up with the position of the song
-            if self
+            let status = self
                 .mgmt
                 .lock()
                 .unwrap()
                 .metadata
                 .lock()
                 .unwrap()
-                .playback_status
-                == PlaybackStatus::Playing
-            {
+                .playback_status;
+            if status == PlaybackStatus::Playing {
                 let status_idx = self.size.height.saturating_sub(1);
                 queue!(
                     self.stdout,
@@ -217,40 +250,83 @@ impl Ui {
     }
 
     fn state(&self) -> &State {
+        // Get the current state
         self.states.get(&self.ptr).unwrap()
     }
 
     fn state_mut(&mut self) -> &mut State {
+        // Get the current state as a mutable reference
         self.states.get_mut(&self.ptr).unwrap()
     }
 
     fn select(&mut self) {
         // Play the selected track
-        if let State::Library { selection } = self.state() {
-            let mut mgmt = self.mgmt.lock().unwrap();
-            let lookup = track_list_display(&mgmt.database.tracks);
-            let id = lookup[*selection];
-            mgmt.load(id);
-            mgmt.play();
+        match self.state() {
+            State::Library { selection } => {
+                let mut mgmt = self.mgmt.lock().unwrap();
+                let lookup = track_list_display(&mgmt.database.tracks);
+                let id = lookup[*selection];
+                mgmt.load(id);
+                mgmt.play();
+            }
+            State::Files {
+                selection,
+                list,
+                dir,
+            } => {
+                let mut mgmt = self.mgmt.lock().unwrap();
+                let selection = *selection;
+                let file = &list[selection];
+                let dir = dir.to_owned() + "/" + file;
+                if is_file(&dir) {
+                    mgmt.add_library(Track::load(&dir));
+                } else {
+                    let list = list_dir(&dir, !mgmt.config.show_hidden_files);
+                    *self.states.get_mut(&self.ptr).unwrap() = State::Files {
+                        selection: 0,
+                        list,
+                        dir,
+                    };
+                }
+            }
+            _ => (),
         }
     }
 
     fn selection_up(&mut self) {
         // Move the current selection down
-        if let State::Library { selection } = self.state_mut() {
-            if *selection > 0 {
-                *selection -= 1;
+        match self.state_mut() {
+            State::Library { selection } => {
+                if *selection > 0 {
+                    *selection -= 1
+                }
             }
+            State::Files { selection, .. } => {
+                if *selection > 0 {
+                    *selection -= 1
+                }
+            }
+            _ => (),
         }
     }
 
     fn selection_down(&mut self) {
         // Move the current selection down
         let tracks = self.mgmt.lock().unwrap().database.tracks.len();
-        if let State::Library { selection } = self.state_mut() {
-            if *selection + 1 < tracks {
-                *selection += 1;
+        match self.state_mut() {
+            State::Library { selection } => {
+                if *selection + 1 < tracks {
+                    *selection += 1
+                }
             }
+            State::Files {
+                selection, list, ..
+            } => {
+                if *selection + 1 < list.len() {
+                    *selection += 1
+                }
+            }
+            _ => (),
         }
     }
 
@@ -272,11 +348,22 @@ impl Ui {
     pub fn render(&mut self) -> Result<()> {
         // Acquire manager
         let mgmt = self.mgmt.lock().unwrap();
-        // Get list of tracks
-        // NOTE: Make sure to "if" this when more states are added for optimisation
-        let keys = track_list_display(&mgmt.database.tracks);
-        let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
-        let table = pad_table(format_table(&tracks), self.size.width as usize);
+        // Obtain render data for the current state
+        let ((keys, tracks), paths): (TrackList, FileList) = match self.state() {
+            State::Library { .. } => {
+                // Obtain list of tracks
+                let keys = track_list_display(&mgmt.database.tracks);
+                let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
+                let table = pad_table(format_table(&tracks), self.size.width as usize);
+                ((Some(keys), Some(table)), None)
+            }
+            State::Files { dir, .. } => {
+                // Obtain list of files
+                let files = list_dir(dir, !mgmt.config.show_hidden_files);
+                ((None, None), Some(files))
+            }
+            State::Empty => ((None, None), None),
+        };
         std::mem::drop(mgmt);
         // Do render
         for line in 0..self.size.height {
@@ -294,22 +381,35 @@ impl Ui {
                 // Acquire manager
                 let mgmt = self.mgmt.lock().unwrap();
                 // Render library view
-                if let State::Library { selection } = self.state() {
-                    if let Some(row) = table.get(line as usize) {
-                        let is_selected = *selection == line.into();
-                        let is_playing = mgmt.playlist.current_id() == Some(keys[line as usize]);
-                        // Set up formatting for list
-                        if is_selected {
-                            queue!(self.stdout, SetBg(Color::DarkGrey))?;
-                        }
-                        if is_playing {
-                            queue!(self.stdout, SetFg(Color::Green))?;
-                        }
-                        // Print row content
-                        queue!(self.stdout, Print(row))?;
-                        // Reset formatting for next row
-                        queue!(self.stdout, SetBg(Color::Reset), SetFg(Color::Reset))?;
+                let selection = self.state().get_selection();
+                if let Some(row) = tracks.as_ref().unwrap().get(line as usize) {
+                    let is_selected = selection == line.into();
+                    let is_playing =
+                        mgmt.playlist.current_id() == Some(keys.as_ref().unwrap()[line as usize]);
+                    // Set up formatting for list
+                    if is_selected {
+                        queue!(self.stdout, SetBg(Color::DarkGrey))?;
                     }
+                    if is_playing {
+                        queue!(self.stdout, SetFg(Color::Green))?;
+                    }
+                    // Print row content
+                    queue!(self.stdout, Print(row))?;
+                    // Reset formatting for next row
+                    queue!(self.stdout, SetBg(Color::Reset), SetFg(Color::Reset))?;
+                }
+            } else if line != status_idx && self.state().is_files() {
+                let selection = self.state().get_selection();
+                if let Some(row) = paths.as_ref().unwrap().get(line as usize) {
+                    // Add padding
+                    let row = format!("{:<pad$}", row, pad = self.size.width as usize);
+                    // Set up formatting for list
+                    if selection == line.into() {
+                        queue!(self.stdout, SetBg(Color::DarkGrey))?;
+                    }
+                    queue!(self.stdout, Print(row))?;
+                    // Reset formatting for next row
+                    queue!(self.stdout, SetBg(Color::Reset))?;
                 }
             } else if line == status_idx {
                 // Render status line

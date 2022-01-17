@@ -129,10 +129,10 @@ pub fn format_table(tracks: &[&Track]) -> Vec<Vec<String>> {
     // Reform back into rows, taking into account the maximum column size
     for i in 0..tracks.len() {
         let mut row = vec![];
-        row.push(format!("{:<width$}", columns[0][i], width = limits[0]));
-        row.push(format!("{:<width$}", columns[1][i], width = limits[1]));
-        row.push(format!("{:<width$}", columns[2][i], width = limits[2]));
-        row.push(format!("{:<width$}", columns[3][i], width = limits[3]));
+        row.push(align_left(columns[0][i], limits[0]));
+        row.push(align_left(columns[1][i], limits[1]));
+        row.push(align_left(columns[2][i], limits[2]));
+        row.push(align_left(columns[3][i], limits[3]));
         result.push(row);
     }
     result
@@ -147,6 +147,11 @@ pub fn find_longest(target: &[&String]) -> usize {
         }
     }
     longest
+}
+
+pub fn align_left(target: &str, space: usize) -> String {
+    let pad = " ".repeat(space.saturating_sub(target.width()));
+    format!("{}{}", target, pad)
 }
 
 pub fn align_sides(lhs: &str, rhs: &str, space: usize, tab_width: usize) -> usize {
@@ -169,4 +174,19 @@ pub fn timefmt(duration: u64) -> String {
     let minutes: u64 = duration / 60;
     let seconds: u64 = duration % 60;
     format!("{}:{:02}", minutes, seconds)
+}
+
+pub fn is_file(path: &str) -> bool {
+    std::path::Path::new(path).is_file()
+}
+
+pub fn list_dir(path: &str, no_hidden: bool) -> Vec<String> {
+    let mut files: Vec<String> = std::fs::read_dir(path)
+        .unwrap()
+        .map(|d| d.unwrap().file_name().into_string().unwrap())
+        .filter(|d| if no_hidden { !d.starts_with(".") } else { true })
+        .collect();
+    files.push("..".to_string());
+    files.sort();
+    files
 }

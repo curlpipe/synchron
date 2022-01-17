@@ -17,6 +17,8 @@
         1: SimpleLibrary,
         // Empty: An empty pane for demonstration purposes
         2: Empty,
+        // Files: A file browser to add to your library
+        4: Files,
     },
 
     // The pane number to start on when opening synchron
@@ -38,5 +40,8 @@
         "stopped": "栗",
         "progress_bar_full": "",
         "progress_bar_empty": " ",
-    }
+    },
+
+    // If true, then hidden files and folders will be shown in the files pane, otherwise they will be hidden
+    show_hidden_files: false,
 )

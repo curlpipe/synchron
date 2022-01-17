@@ -15,6 +15,7 @@ pub const PULSE: u64 = 200;
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Pane {
     SimpleLibrary,
+    Files,
     Empty,
 }
 
@@ -24,6 +25,7 @@ pub struct Config {
     pub panes: HashMap<u8, Pane>,
     pub open_on_pane: u8,
     pub indicators: HashMap<String, String>,
+    pub show_hidden_files: bool,
 }
 
 impl Config {

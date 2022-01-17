@@ -8,7 +8,6 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] Set up file browsing on pane 4 (0.8.0)
 - [ ] Link up library editing through tui (0.9.0)
 - [ ] ID3 tag editing in library view (0.10.0)
 - [ ] Set up artist -> album -> track sorting through tui on pane 1 (0.11.0)
@@ -24,3 +23,4 @@
 - [x] ID3 tag editing (0.5.0)
 - [x] Start work on tui frontend (0.6.0)
 - [x] Create panes (0.7.0)
+- [x] Set up file browsing on pane 4 (0.8.0)
