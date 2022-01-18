@@ -149,14 +149,7 @@ impl Ui {
                 self.render()?;
             }
             // Rerender the status line if playing, to keep up with the position of the song
-            let status = self
-                .mgmt
-                .lock()
-                .unwrap()
-                .metadata
-                .lock()
-                .unwrap()
-                .playback_status;
+            let status = get_md!(self.mgmt).playback_status;
             if status == PlaybackStatus::Playing {
                 let status_idx = self.size.height.saturating_sub(1);
                 queue!(
@@ -197,6 +190,8 @@ impl Ui {
             (KMod::NONE, KCode::Char('v')) => self.mgmt.lock().unwrap().pause(),
             // [d] : Delete from library
             (KMod::NONE, KCode::Char('d')) => self.remove(),
+            // [e] : Edit tag of selected song
+            (KMod::NONE, KCode::Char('e')) => self.tag_edit().unwrap_or(()),
             // [Enter] : Play selection / Add track to library
             (KMod::NONE, KCode::Enter) => self.select(),
             // [/\] : Move up selection in library
@@ -233,12 +228,12 @@ impl Ui {
             (KMod::NONE, KCode::Char('m')) => self.mgmt.lock().unwrap().toggle_mute(),
             // [Shift] + [/\] : Volume up
             (KMod::SHIFT, KCode::Up) => {
-                let v = self.mgmt.lock().unwrap().metadata.lock().unwrap().volume;
+                let v = get_md!(self.mgmt).volume;
                 self.mgmt.lock().unwrap().set_volume(v + 0.1);
             }
             // [Shift] + [\/] : Volume down
             (KMod::SHIFT, KCode::Down) => {
-                let v = self.mgmt.lock().unwrap().metadata.lock().unwrap().volume;
+                let v = get_md!(self.mgmt).volume;
                 self.mgmt.lock().unwrap().set_volume(v - 0.1);
             }
             // [;] or [:] : Command mode
@@ -246,6 +241,107 @@ impl Ui {
             // [???] : Do nothing
             _ => (),
         }
+    }
+
+    fn tag_edit(&mut self) -> Result<()> {
+        if self.size.height > 3 {
+            // Get selected track
+            let selection = self.state().get_selection();
+            let lookup = track_list_display(&self.mgmt.lock().unwrap().database.tracks);
+            let id = lookup[selection];
+            // Establish tag type to edit
+            let mut kind = String::new();
+            while !["title", "album", "artist", "year"].contains(&kind.as_str()) {
+                kind = self
+                    .get_input("title/album/artist/year: ")?
+                    .unwrap_or_else(|| "".to_string());
+                if kind == "" {
+                    return Ok(());
+                }
+            }
+            // Establish new tag value
+            if let Some(value) = self.get_input("new value: ")? {
+                // Write tag value
+                match kind.as_str() {
+                    "title" => self.mgmt.lock().unwrap().set_title(id, &value),
+                    "album" => self.mgmt.lock().unwrap().set_album(id, &value),
+                    "artist" => self.mgmt.lock().unwrap().set_artist(id, &value),
+                    "year" => self.mgmt.lock().unwrap().set_year(id, &value),
+                    _ => unreachable!(),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn get_input(&mut self, prompt: &str) -> Result<Option<String>> {
+        // If too few rows, don't bother doing prompt
+        if self.size.height < 3 {
+            return Ok(None);
+        }
+        // Establish empty row at the bottom
+        let input_row = self.size.height;
+        self.size.height -= 1;
+        self.render()?;
+        // Get user input
+        let mut out = String::new();
+        let mut entering = true;
+        while entering {
+            execute!(
+                self.stdout,
+                cursor::MoveTo(0, input_row),
+                terminal::Clear(ClearType::CurrentLine),
+                Print(prompt),
+                Print(&out)
+            )?;
+            // Handle prompt input
+            if event::poll(std::time::Duration::from_millis(PULSE))? {
+                match event::read()? {
+                    Event::Key(k) => match (k.modifiers, k.code) {
+                        (KMod::NONE | KMod::SHIFT, KCode::Char(c)) => out.push(c),
+                        (KMod::NONE, KCode::Backspace) => {
+                            let _ = out.pop();
+                        }
+                        (KMod::NONE, KCode::Enter) => {
+                            entering = false;
+                        }
+                        (KMod::NONE, KCode::Esc) => {
+                            self.size = Size::screen()?;
+                            return Ok(None);
+                        }
+                        _ => (),
+                    },
+                    Event::Resize(width, height) => {
+                        self.size = Size {
+                            width,
+                            height: height - 1,
+                        };
+                        self.render()?;
+                    }
+                    Event::Mouse(..) => (),
+                }
+                self.render()?;
+            } else if self.mgmt.lock().unwrap().updated {
+                self.mgmt.lock().unwrap().updated = false;
+                self.render()?;
+            }
+            // Rerender the status line if playing, to keep up with the position of the song
+            let status = get_md!(self.mgmt).playback_status;
+            if status == PlaybackStatus::Playing {
+                let status_idx = self.size.height.saturating_sub(1);
+                queue!(
+                    self.stdout,
+                    cursor::MoveTo(0, status_idx),
+                    terminal::Clear(ClearType::CurrentLine)
+                )?;
+                self.rerender_status()?;
+                self.stdout.flush()?;
+            }
+            self.render()?;
+        }
+        // Reset shifted row
+        self.size = Size::screen()?;
+        Ok(Some(out))
     }
 
     fn switch_mode(&mut self, mode: u8) {

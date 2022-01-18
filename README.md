@@ -46,6 +46,7 @@ order to use synchron.
 | <kbd>v</kbd>                       | Pause music playback.                     |
 | <kbd>Enter</kbd>                   | Play selected track in library.           |
 | <kbd>d</kbd>                       | Delete selected track from library.       |
+| <kbd>e</kbd>                       | Toggle tag editing prompt.                |
 | <kbd>Up</kbd>                      | Move selection up.                        |
 | <kbd>Down</kbd>                    | Move selection down.                      |
 | <kbd>Ctrl</kbd> + <kbd>Up</kbd>    | Move selection to top.                    |

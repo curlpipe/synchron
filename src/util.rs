@@ -30,6 +30,14 @@ macro_rules! add_prop {
     };
 }
 
+// Utility macro for getting metadata from manager
+#[macro_export]
+macro_rules! get_md {
+    ($mgmt:expr) => {
+        $mgmt.lock().unwrap().metadata.lock().unwrap()
+    };
+}
+
 pub fn expand_path(path: &str) -> Option<String> {
     // Utility function for expanding paths
     let with_user = expanduser::expanduser(path).ok()?;
