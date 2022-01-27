@@ -63,8 +63,9 @@ order to use synchron.
 | <kbd>Shift</kbd> + <kbd>Up</kbd>   | Volume up.                                |
 | <kbd>Shift</kbd> + <kbd>Down</kbd> | Volume down.                              |
 | <kbd>;</kbd> OR <kbd>:</kbd>       | Open command mode within TUI mode.        |
-| <kbd>1</kbd>                       | Go to simple library pane.                |
-| <kbd>2</kbd>                       | Go to empty pane.                         |
+| <kbd>1</kbd>                       | Go to sorted library view.                |
+| <kbd>2</kbd>                       | Go to simple library view.                |
+| <kbd>3</kbd>                       | Go to empty pane.                         |
 | <kbd>4</kbd>                       | Go to file browser.                       |
 
 ## CLI mode commands
