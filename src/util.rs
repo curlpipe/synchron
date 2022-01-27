@@ -1,5 +1,7 @@
 // util.rs - common utilities for helping out around the project
 use crate::track::Track;
+use crate::ui::{Color, SetBg, SetFg};
+use crossterm::style::{Attribute as Attr, SetAttribute as SetAttr};
 use std::collections::HashMap;
 use unicode_width::UnicodeWidthStr;
 
@@ -58,6 +60,10 @@ pub fn width(s: &str, tab: usize) -> usize {
 }
 
 pub fn pad_table(table: Vec<Vec<String>>, limit: usize) -> Vec<String> {
+    // Check table isn't empty
+    if table.is_empty() {
+        return vec![];
+    }
     // Apply padding to table and form into strings
     let mut result = vec![];
     // Calculate the lengths needed
@@ -172,12 +178,6 @@ pub fn align_sides(lhs: &str, rhs: &str, space: usize, tab_width: usize) -> usiz
     }
 }
 
-pub fn track_list_display(list: &HashMap<usize, Track>) -> Vec<usize> {
-    let mut keys: Vec<usize> = list.keys().copied().collect();
-    keys.sort_unstable();
-    keys
-}
-
 pub fn timefmt(duration: u64) -> String {
     let minutes: u64 = duration / 60;
     let seconds: u64 = duration % 60;
@@ -197,4 +197,154 @@ pub fn list_dir(path: &str, no_hidden: bool) -> Vec<String> {
     files.push("..".to_string());
     files.sort();
     files
+}
+
+pub fn form_library_tree(
+    tracks: &HashMap<usize, Track>,
+) -> HashMap<String, HashMap<String, Vec<usize>>> {
+    // Create a library tree from a list of tracks
+    let mut result: HashMap<String, HashMap<String, Vec<usize>>> = HashMap::new();
+    for (id, track) in tracks {
+        if let Some(albums) = result.get_mut(&track.tag.artist) {
+            if let Some(tracks) = albums.get_mut(&track.tag.album) {
+                // Add it to existing entry if known
+                tracks.push(*id);
+            } else {
+                // Create new key value pair
+                albums.insert(track.tag.album.clone(), vec![*id]);
+            }
+        } else {
+            // Create new key value pair
+            result.insert(track.tag.artist.clone(), HashMap::new());
+            result
+                .get_mut(&track.tag.artist)
+                .unwrap()
+                .insert(track.tag.album.clone(), vec![*id]);
+        }
+    }
+    result
+}
+
+pub fn format_artist_track(
+    listing: &HashMap<String, HashMap<String, Vec<usize>>>,
+    selection: (usize, usize, &HashMap<usize, usize>),
+    focus: u8,
+    lookup: &HashMap<usize, Track>,
+    playing: Option<usize>,
+) -> Vec<String> {
+    let mut result = vec![];
+    let (artist_ptr, album_ptr, track_ptr) = selection;
+    // Gather list of artists
+    let mut artists: Vec<&String> = listing.keys().collect();
+    artists.sort();
+    // Gather list of selected artist's albums
+    let mut albums: Vec<&String> = listing[artists[artist_ptr]].keys().collect();
+    albums.sort();
+    // Gather years for albums
+    let mut years = vec![];
+    for album in &albums {
+        let artist = &listing[artists[artist_ptr]];
+        let album = &artist[*album];
+        let track_id = album[0];
+        years.push(lookup[&track_id].tag.year.to_string());
+    }
+    // Gather list of all tracks from this artist
+    let mut tracks: Vec<usize> = vec![];
+    for album in &albums {
+        let this = &listing[artists[artist_ptr]][*album];
+        for track in this {
+            tracks.push(*track);
+        }
+    }
+    // Format rhs of table
+    let curve_bar = format!("{}╭{}", SetFg(Color::DarkBlue), SetFg(Color::Reset));
+    let vertical_bar = format!("{}│{}", SetFg(Color::DarkBlue), SetFg(Color::Reset));
+    for (album, year) in albums.iter().zip(years) {
+        result.push(format!(
+            "{} {}{} - {}{}",
+            curve_bar,
+            SetFg(Color::DarkBlue),
+            album,
+            year,
+            SetFg(Color::Reset)
+        ));
+        let this = &listing[artists[artist_ptr]][*album];
+        for track in this {
+            let track_title = if Some(*track) == playing {
+                format!(
+                    "{}{}{}",
+                    SetFg(Color::Green),
+                    lookup[track].tag.title,
+                    SetFg(Color::Reset)
+                )
+            } else {
+                format!("{}", lookup[track].tag.title)
+            };
+            if *track == tracks[track_ptr[&artist_ptr]] {
+                if focus == 0 {
+                    result.push(format!("{} {}", vertical_bar, track_title,));
+                } else {
+                    result.push(format!(
+                        "{} {}{}{}",
+                        vertical_bar,
+                        SetBg(Color::DarkGrey),
+                        track_title,
+                        SetBg(Color::Reset)
+                    ));
+                }
+            } else {
+                result.push(format!("{} {}", vertical_bar, track_title));
+            }
+        }
+    }
+    // Fill spaces
+    if artists.len() > albums.len() {
+        let left = artists.len() - albums.len();
+        for _ in 0..left {
+            result.push("".to_string());
+        }
+    }
+    // Splice lhs of table
+    let pad = find_longest(&artists);
+    for (row, artist) in result.iter_mut().zip(&artists) {
+        if artist == &artists[artist_ptr] {
+            if focus == 0 {
+                *row = format!(
+                    "{}{}{} {}",
+                    SetBg(Color::DarkGrey),
+                    align_left(artist, pad),
+                    SetBg(Color::Reset),
+                    row
+                );
+            } else {
+                *row = format!(
+                    "{}{}{} {}",
+                    SetFg(Color::DarkBlue),
+                    align_left(artist, pad),
+                    SetFg(Color::Reset),
+                    row
+                );
+            }
+        } else {
+            *row = format!("{} {}", align_left(artist, pad), row);
+        }
+    }
+    result
+}
+
+pub fn artist_tracks(
+    listing: &HashMap<String, HashMap<String, Vec<usize>>>,
+    artist: usize,
+) -> Vec<usize> {
+    let mut artists: Vec<&String> = listing.keys().collect();
+    artists.sort();
+    let mut albums: Vec<&String> = listing[artists[artist]].keys().collect();
+    albums.sort();
+    let mut result = vec![];
+    for album in albums {
+        for track in &listing[artists[artist]][album] {
+            result.push(*track);
+        }
+    }
+    result
 }

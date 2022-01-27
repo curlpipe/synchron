@@ -15,6 +15,7 @@ pub const PULSE: u64 = 200;
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Pane {
     SimpleLibrary,
+    SortedLibrary,
     Files,
     Empty,
 }
@@ -48,6 +49,7 @@ impl Config {
 pub struct Database {
     pub tracks: HashMap<usize, Track>,
     pub playlists: HashMap<String, Vec<usize>>,
+    pub display: Vec<usize>,
 }
 
 impl Database {

@@ -1,4 +1,5 @@
 (
     tracks: {},
     playlists: {},
+    display: [],
 )

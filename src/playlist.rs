@@ -4,8 +4,8 @@ use crate::Track;
 #[derive(Default)]
 pub struct PlayList {
     tracks: Vec<Track>,
-    ids: Vec<usize>,
-    ptr: usize,
+    pub ids: Vec<usize>,
+    ptr: Option<usize>,
 }
 
 impl PlayList {
@@ -17,12 +17,15 @@ impl PlayList {
 
     pub fn queue_next(&mut self, track: Track, id: usize) {
         // Add song to play immediately after the current one
-        self.tracks.insert(self.ptr + 1, track);
-        self.ids.insert(self.ptr + 1, id);
+        self.tracks.insert(self.get_ptr() + 1, track);
+        self.ids.insert(self.get_ptr() + 1, id);
     }
 
     pub fn play(&mut self, track: Track, id: usize) -> Option<Track> {
         // Immediately add song and start playing it
+        if !self.is_ready() {
+            self.ptr = Some(0);
+        }
         if self.tracks.is_empty() {
             self.queue(track, id);
             self.current()
@@ -34,7 +37,7 @@ impl PlayList {
 
     pub fn set(&mut self, ptr: usize, tracks: Vec<Track>, ids: Vec<usize>) {
         // Insert a custom playlist to use, as well as an index to start from
-        self.ptr = ptr;
+        self.ptr = Some(ptr);
         self.tracks = tracks;
         self.ids = ids;
     }
@@ -43,23 +46,23 @@ impl PlayList {
         // Clear the playlist
         self.tracks.clear();
         self.ids.clear();
-        self.ptr = 0;
+        self.ptr = Some(0);
     }
 
     pub fn next(&mut self) -> Option<Track> {
         // Switch to the next track in the queue
-        if self.ptr + 1 >= self.tracks.len() {
+        if self.get_ptr() + 1 >= self.tracks.len() {
             None
         } else {
-            self.ptr += 1;
+            self.ptr = Some(self.get_ptr() + 1);
             self.current()
         }
     }
 
     pub fn previous(&mut self) -> Option<Track> {
         // Switch to the previously played track
-        if self.ptr > 0 {
-            self.ptr -= 1;
+        if self.get_ptr() > 0 {
+            self.ptr = Some(self.get_ptr() - 1);
             self.current()
         } else {
             None
@@ -68,24 +71,41 @@ impl PlayList {
 
     pub fn current_id(&self) -> Option<usize> {
         // Get the currently playing track ID
-        Some(*self.ids.get(self.ptr)?)
+        Some(*self.ids.get(self.get_ptr())?)
     }
 
     pub fn current(&self) -> Option<Track> {
         // Get the currently playing track
-        Some(self.tracks.get(self.ptr)?.clone())
+        if !self.is_ready() {
+            return None;
+        }
+        Some(self.tracks.get(self.get_ptr())?.clone())
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ptr.is_some()
+    }
+
+    pub fn get_ptr(&self) -> usize {
+        self.ptr.unwrap()
     }
 
     pub fn move_down(&mut self, ptr: usize) {
         // Move a particular track downwards
         self.tracks.swap(ptr, ptr + 1);
         self.ids.swap(ptr, ptr + 1);
+        if ptr == self.get_ptr() {
+            self.ptr = Some(self.get_ptr() + 1);
+        }
     }
 
     pub fn move_up(&mut self, ptr: usize) {
         // Move a particular track upwards
         self.tracks.swap(ptr, ptr.saturating_sub(1));
         self.ids.swap(ptr, ptr.saturating_sub(1));
+        if ptr == self.get_ptr() {
+            self.ptr = Some(self.get_ptr().saturating_sub(1));
+        }
     }
 
     pub fn move_next(&mut self, ptr: usize) {
@@ -100,7 +120,7 @@ impl PlayList {
         for (c, track) in self.tracks.iter().enumerate() {
             result.push_str(&format!(
                 "{}{}\n",
-                if c == self.ptr { "-> " } else { "   " },
+                if c == self.get_ptr() { "-> " } else { "   " },
                 track.format()
             ));
         }

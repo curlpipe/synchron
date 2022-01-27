@@ -13,10 +13,12 @@
     // Modes can be triggered by pressing the corresponding number key as listed below (e.g. 1 to go to SimpleLibrary)
     // Feel free to rearrange, delete and add new modes to customise your set up.
     panes: {
+        // SortedLibrary: Drill down into your artists, their albums, and the tracks on those albums.
+        1: SortedLibrary,
         // SimpleLibrary: A single list of all your music. Ideal for updating tags and playing all your music.
-        1: SimpleLibrary,
+        2: SimpleLibrary,
         // Empty: An empty pane for demonstration purposes
-        2: Empty,
+        3: Empty,
         // Files: A file browser to add to your library
         4: Files,
     },

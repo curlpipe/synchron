@@ -3,8 +3,8 @@ use crate::audio::{LoopStatus, Manager, PlaybackStatus};
 use crate::config::{Pane, PULSE};
 use crate::track::Track;
 use crate::util::{
-    align_sides, expand_path, format_table, is_file, list_dir, pad_table, timefmt,
-    track_list_display,
+    align_sides, artist_tracks, expand_path, form_library_tree, format_artist_track, format_table,
+    is_file, list_dir, pad_table, timefmt,
 };
 pub use crossterm::{
     cursor,
@@ -21,6 +21,7 @@ use std::time::Duration;
 
 type OptionList = Option<Vec<String>>;
 type TrackList = (Option<Vec<usize>>, OptionList);
+type SortedList = Option<Vec<String>>;
 type FileList = OptionList;
 
 pub struct Size {
@@ -46,6 +47,12 @@ pub enum State {
         dir: String,
         list: Vec<String>,
     },
+    SortedLibrary {
+        depth: u8,
+        artist: usize,
+        album: usize,
+        track: HashMap<usize, usize>,
+    },
     Empty,
 }
 
@@ -58,11 +65,27 @@ impl State {
         matches!(self, Self::Files { .. })
     }
 
+    pub fn is_sorted_library(&self) -> bool {
+        matches!(self, Self::SortedLibrary { .. })
+    }
+
     pub fn get_selection(&self) -> usize {
         match self {
-            Self::Library { selection } => *selection,
+            Self::Library { selection, .. } => *selection,
             Self::Files { selection, .. } => *selection,
-            _ => unreachable!(),
+            Self::SortedLibrary {
+                artist,
+                track,
+                depth,
+                ..
+            } => {
+                if *depth == 0 {
+                    *artist
+                } else {
+                    track[artist]
+                }
+            }
+            Self::Empty => unreachable!(),
         }
     }
 }
@@ -72,14 +95,22 @@ pub struct Ui {
     mgmt: Arc<Mutex<Manager>>,
     states: HashMap<u8, State>,
     ptr: u8,
+    play_ptr: u8,
     size: Size,
     active: bool,
+    library_updated: bool,
 }
 
 impl Ui {
     pub fn new(m: Arc<Mutex<Manager>>) -> Result<Self> {
         // Create new UI
         let mgmt = m.lock().unwrap();
+        // Create track pointers for artists
+        let artists = mgmt.library_tree.keys().len();
+        let mut track = HashMap::new();
+        for i in 0..artists {
+            track.insert(i, 0);
+        }
         // Set up states
         let mut states = HashMap::default();
         for (key, pane) in &mgmt.config.panes {
@@ -87,6 +118,12 @@ impl Ui {
                 *key,
                 match pane {
                     Pane::SimpleLibrary => State::Library { selection: 0 },
+                    Pane::SortedLibrary => State::SortedLibrary {
+                        depth: 0,
+                        track: track.clone(),
+                        album: 0,
+                        artist: 0,
+                    },
                     Pane::Files => {
                         let dir = expand_path("~/").unwrap_or_else(|| ".".to_string());
                         State::Files {
@@ -107,8 +144,10 @@ impl Ui {
             mgmt: m,
             states,
             ptr,
+            play_ptr: ptr,
             size: Size::screen()?,
             active: true,
+            library_updated: false,
         })
     }
 
@@ -116,17 +155,6 @@ impl Ui {
         // Initiate the UI
         execute!(self.stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
         terminal::enable_raw_mode()?;
-        // Handle any panics that may occur
-        std::panic::set_hook(Box::new(|e| {
-            terminal::disable_raw_mode().unwrap();
-            execute!(
-                std::io::stdout(),
-                terminal::LeaveAlternateScreen,
-                cursor::Show
-            )
-            .unwrap();
-            eprintln!("{}", e);
-        }));
         Ok(())
     }
 
@@ -236,6 +264,8 @@ impl Ui {
                 let v = get_md!(self.mgmt).volume;
                 self.mgmt.lock().unwrap().set_volume(v - 0.1);
             }
+            // [Tab] : Recurse deeper into sorted library
+            (KMod::NONE, KCode::Tab) => self.deepen(),
             // [;] or [:] : Command mode
             (KMod::NONE, KCode::Char(':' | ';')) => (),
             // [???] : Do nothing
@@ -243,31 +273,62 @@ impl Ui {
         }
     }
 
+    fn get_selected_id(&self) -> Option<usize> {
+        // Get the track id that is selected (state independent)
+        Some(match self.state() {
+            State::Library { selection, .. } => {
+                self.mgmt.lock().unwrap().database.display[*selection]
+            }
+            State::SortedLibrary {
+                artist,
+                track,
+                depth: 1,
+                ..
+            } => artist_tracks(&self.mgmt.lock().unwrap().library_tree, *artist)[track[artist]],
+            _ => return None,
+        })
+    }
+
+    fn deepen(&mut self) {
+        // Switch focus in the sorted library view
+        if let State::SortedLibrary { depth, .. } = self.state_mut() {
+            if depth == &1 {
+                *depth = 0;
+            } else {
+                *depth += 1;
+            }
+        }
+    }
+
     fn tag_edit(&mut self) -> Result<()> {
+        // Ensure there are available tracks
+        if self.mgmt.lock().unwrap().database.tracks.is_empty() {
+            return Ok(());
+        }
+        // If there is enough room...
         if self.size.height > 3 {
             // Get selected track
-            let selection = self.state().get_selection();
-            let lookup = track_list_display(&self.mgmt.lock().unwrap().database.tracks);
-            let id = lookup[selection];
-            // Establish tag type to edit
-            let mut kind = String::new();
-            while !["title", "album", "artist", "year"].contains(&kind.as_str()) {
-                kind = self
-                    .get_input("title/album/artist/year: ")?
-                    .unwrap_or_else(|| "".to_string());
-                if kind == "" {
-                    return Ok(());
+            if let Some(id) = self.get_selected_id() {
+                // Establish tag type to edit
+                let mut kind = String::new();
+                while !["title", "album", "artist", "year"].contains(&kind.as_str()) {
+                    kind = self
+                        .get_input("title/album/artist/year: ")?
+                        .unwrap_or_else(|| "".to_string());
+                    if kind == "" {
+                        return Ok(());
+                    }
                 }
-            }
-            // Establish new tag value
-            if let Some(value) = self.get_input("new value: ")? {
-                // Write tag value
-                match kind.as_str() {
-                    "title" => self.mgmt.lock().unwrap().set_title(id, &value),
-                    "album" => self.mgmt.lock().unwrap().set_album(id, &value),
-                    "artist" => self.mgmt.lock().unwrap().set_artist(id, &value),
-                    "year" => self.mgmt.lock().unwrap().set_year(id, &value),
-                    _ => unreachable!(),
+                // Establish new tag value
+                if let Some(value) = self.get_input("new value: ")? {
+                    // Write tag value
+                    match kind.as_str() {
+                        "title" => self.mgmt.lock().unwrap().set_title(id, &value),
+                        "album" => self.mgmt.lock().unwrap().set_album(id, &value),
+                        "artist" => self.mgmt.lock().unwrap().set_artist(id, &value),
+                        "year" => self.mgmt.lock().unwrap().set_year(id, &value),
+                        _ => unreachable!(),
+                    }
                 }
             }
         }
@@ -349,6 +410,13 @@ impl Ui {
         if self.states.contains_key(&mode) {
             self.ptr = mode;
         }
+        // Update library tree if necessary
+        if self.library_updated {
+            let mut mgmt = self.mgmt.lock().unwrap();
+            let tracks = &mgmt.database.tracks;
+            mgmt.library_tree = form_library_tree(tracks);
+            self.library_updated = false;
+        }
     }
 
     fn state(&self) -> &State {
@@ -362,23 +430,85 @@ impl Ui {
     }
 
     fn remove(&mut self) {
+        // Ensure there are available tracks
+        if self.mgmt.lock().unwrap().database.tracks.is_empty() {
+            return;
+        }
         // Remove from library
-        if let State::Library { selection } = self.state() {
-            let mut mgmt = self.mgmt.lock().unwrap();
-            let lookup = track_list_display(&mgmt.database.tracks);
-            let id = lookup[*selection];
-            mgmt.remove_library(id);
+        let mut selection_off = false;
+        match self.state() {
+            State::Library { selection, .. } => {
+                let mut mgmt = self.mgmt.lock().unwrap();
+                // Get track ID
+                if let Some(id) = self.get_selected_id() {
+                    mgmt.remove_library(id);
+                    // Check for selection issues
+                    if selection > &mgmt.database.display.len().saturating_sub(2) {
+                        selection_off = true;
+                    }
+                    // Trigger library tree rerender
+                    self.library_updated = true;
+                }
+            }
+            State::SortedLibrary {
+                depth,
+                artist,
+                track,
+                ..
+            } => {
+                if *depth == 1 {
+                    let mut mgmt = self.mgmt.lock().unwrap();
+                    let tracks = artist_tracks(&mgmt.library_tree, *artist);
+                    // Get track ID
+                    let id = tracks[track[artist]];
+                    mgmt.remove_library(id);
+                    // Check for selection issues
+                    if track[artist] > tracks.len().saturating_sub(3) {
+                        selection_off = true;
+                    }
+                    // Trigger library tree rerender
+                    self.library_updated = true;
+                }
+            }
+            _ => (),
+        }
+        // Correct selection issues
+        if selection_off {
+            self.selection_up();
         }
     }
 
     fn select(&mut self) {
         // Play the selected track
         match self.state() {
-            State::Library { selection } => {
+            State::Library { selection, .. } => {
                 let mut mgmt = self.mgmt.lock().unwrap();
-                let lookup = track_list_display(&mgmt.database.tracks);
+                // Ensure there are available tracks
+                if mgmt.database.tracks.is_empty() {
+                    return;
+                }
+                let lookup = mgmt.database.display.clone();
+                let tracks = lookup
+                    .iter()
+                    .map(|x| mgmt.database.tracks[x].clone())
+                    .collect();
                 let id = lookup[*selection];
                 mgmt.load(id);
+                mgmt.playlist.set(*selection, tracks, lookup);
+                self.play_ptr = self.ptr;
+                mgmt.play();
+            }
+            State::SortedLibrary { artist, track, .. } => {
+                let mut mgmt = self.mgmt.lock().unwrap();
+                let lookup = artist_tracks(&mgmt.library_tree, *artist);
+                let tracks = lookup
+                    .iter()
+                    .map(|x| mgmt.database.tracks[x].clone())
+                    .collect();
+                let id = lookup[track[artist]];
+                mgmt.load(id);
+                mgmt.playlist.set(track[artist], tracks, lookup);
+                self.play_ptr = self.ptr;
                 mgmt.play();
             }
             State::Files {
@@ -392,6 +522,8 @@ impl Ui {
                 let dir = dir.to_owned() + "/" + file;
                 if is_file(&dir) {
                     mgmt.add_library(Track::load(&dir));
+                    // Trigger library tree rerender
+                    self.library_updated = true;
                 } else {
                     let list = list_dir(&dir, !mgmt.config.show_hidden_files);
                     *self.states.get_mut(&self.ptr).unwrap() = State::Files {
@@ -408,21 +540,18 @@ impl Ui {
     fn track_up(&mut self) {
         // Move track upwards
         let mut mgmt = self.mgmt.lock().unwrap();
-        if let State::Library { selection } = self.state() {
+        // Ensure there are available tracks
+        if mgmt.database.tracks.is_empty() {
+            return;
+        }
+        if let State::Library { selection, .. } = self.state() {
             if *selection != 0 {
-                let tracks = track_list_display(&mgmt.database.tracks);
-                // Get locations of selected track and track above
-                let select = tracks[*selection];
-                let above = tracks[selection - 1];
-                // Remove both
-                let above_this = mgmt.database.tracks.remove(&above).unwrap();
-                let this = mgmt.database.tracks.remove(&select).unwrap();
-                // Reinsert them, in a swapped order
-                mgmt.database.tracks.insert(select, above_this);
-                mgmt.database.tracks.insert(above, this);
+                // Update database
+                mgmt.database
+                    .display
+                    .swap(*selection, selection.saturating_sub(1));
             }
         }
-        mgmt.database.write();
         std::mem::drop(mgmt);
         self.selection_up();
     }
@@ -430,19 +559,16 @@ impl Ui {
     fn track_down(&mut self) {
         // Move track downwards
         let mut mgmt = self.mgmt.lock().unwrap();
-        if let State::Library { selection } = self.state() {
+        // Ensure there are available tracks
+        if mgmt.database.tracks.is_empty() {
+            return;
+        }
+        if let State::Library { selection, .. } = self.state() {
             if *selection < mgmt.database.tracks.len().saturating_sub(1) {
-                let tracks = track_list_display(&mgmt.database.tracks);
-                let selection = tracks[*selection];
-                let idx = selection + 1;
-                let below = tracks.get(idx).unwrap_or(&idx);
-                let below_this = mgmt.database.tracks.remove(&below).unwrap();
-                let this = mgmt.database.tracks.remove(&selection).unwrap();
-                mgmt.database.tracks.insert(selection, below_this);
-                mgmt.database.tracks.insert(*below, this);
+                // Update database
+                mgmt.database.display.swap(*selection, *selection + 1);
             }
         }
-        mgmt.database.write();
         std::mem::drop(mgmt);
         self.selection_down();
     }
@@ -450,7 +576,7 @@ impl Ui {
     fn selection_up(&mut self) {
         // Move the current selection down
         match self.state_mut() {
-            State::Library { selection } => {
+            State::Library { selection, .. } => {
                 if *selection > 0 {
                     *selection -= 1
                 }
@@ -460,6 +586,18 @@ impl Ui {
                     *selection -= 1
                 }
             }
+            State::SortedLibrary {
+                artist,
+                track,
+                depth,
+                ..
+            } => {
+                if *depth == 0 && *artist > 0 {
+                    *artist -= 1
+                } else if *depth == 1 && track[artist] > 0 {
+                    *track.get_mut(artist).unwrap() -= 1;
+                }
+            }
             _ => (),
         }
     }
@@ -467,8 +605,17 @@ impl Ui {
     fn selection_down(&mut self) {
         // Move the current selection down
         let tracks = self.mgmt.lock().unwrap().database.tracks.len();
+        let artists = self.mgmt.lock().unwrap().library_tree.len();
+        // If in sorted library, get list of tracks in artist
+        let track_list = if let State::SortedLibrary { artist, .. } = self.state() {
+            let mgmt = self.mgmt.lock().unwrap();
+            Some(artist_tracks(&mgmt.library_tree, *artist))
+        } else {
+            None
+        };
+        // Perform selection move
         match self.state_mut() {
-            State::Library { selection } => {
+            State::Library { selection, .. } => {
                 if *selection + 1 < tracks {
                     *selection += 1
                 }
@@ -480,43 +627,130 @@ impl Ui {
                     *selection += 1
                 }
             }
+            State::SortedLibrary {
+                artist,
+                track,
+                depth,
+                ..
+            } => {
+                if *depth == 0 && *artist + 1 < artists {
+                    *artist += 1
+                } else if *depth == 1 && track[artist] + 1 < track_list.unwrap().len() {
+                    *track.get_mut(artist).unwrap() += 1;
+                }
+            }
             _ => (),
         }
     }
 
     fn selection_top(&mut self) {
         // Move the selection to the top of the library
-        if let State::Library { selection } = self.state_mut() {
-            *selection = 0;
+        match self.state_mut() {
+            State::Library { selection } => {
+                *selection = 0;
+            }
+            State::Files { selection, .. } => {
+                *selection = 0;
+            }
+            State::SortedLibrary {
+                depth,
+                artist,
+                track,
+                ..
+            } => {
+                if *depth == 0 {
+                    *artist = 0;
+                } else {
+                    *track.get_mut(artist).unwrap() = 0;
+                }
+            }
+            _ => (),
         }
     }
 
     fn selection_bottom(&mut self) {
         // Move the selection to the top of the library
         let tracks = self.mgmt.lock().unwrap().database.tracks.len();
-        if let State::Library { selection } = self.state_mut() {
-            *selection = tracks.saturating_sub(1);
+        let artists = self.mgmt.lock().unwrap().library_tree.len();
+        // If in sorted library, get list of tracks in artist
+        let track_list = if let State::SortedLibrary { artist, .. } = self.state() {
+            let mgmt = self.mgmt.lock().unwrap();
+            Some(artist_tracks(&mgmt.library_tree, *artist))
+        } else {
+            None
+        };
+        match self.state_mut() {
+            State::Library { selection } => {
+                *selection = tracks.saturating_sub(1);
+            }
+            State::Files {
+                selection, list, ..
+            } => {
+                *selection = list.len().saturating_sub(1);
+            }
+            State::SortedLibrary {
+                depth,
+                artist,
+                track,
+                ..
+            } => {
+                if *depth == 0 {
+                    *artist = artists.saturating_sub(1);
+                } else {
+                    *track.get_mut(artist).unwrap() = track_list.unwrap().len().saturating_sub(1);
+                }
+            }
+            _ => (),
         }
     }
 
     pub fn render(&mut self) -> Result<()> {
         // Acquire manager
-        let mgmt = self.mgmt.lock().unwrap();
+        let mut mgmt = self.mgmt.lock().unwrap();
         // Obtain render data for the current state
-        let ((keys, tracks), paths): (TrackList, FileList) = match self.state() {
+        let ((keys, tracks), paths, artist_track): (TrackList, FileList, SortedList) = match self
+            .state()
+        {
             State::Library { .. } => {
                 // Obtain list of tracks
-                let keys = track_list_display(&mgmt.database.tracks);
+                let keys = mgmt.database.display.clone();
                 let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
                 let table = pad_table(format_table(&tracks), self.size.width as usize);
-                ((Some(keys), Some(table)), None)
+                ((Some(keys), Some(table)), None, None)
+            }
+            State::SortedLibrary {
+                artist,
+                album,
+                track,
+                depth,
+                ..
+            } => {
+                // Prevent rendering with outdated library tree
+                if self.library_updated {
+                    let tracks = &mgmt.database.tracks;
+                    mgmt.library_tree = form_library_tree(tracks);
+                }
+                let id_playing = if mgmt.playlist.is_ready() {
+                    mgmt.playlist.current_id()
+                } else {
+                    None
+                };
+                let table = format_artist_track(
+                    &mgmt.library_tree,
+                    (*artist, *album, track),
+                    *depth,
+                    &mgmt.database.tracks,
+                    id_playing,
+                );
+                self.library_updated = false;
+                ((None, None), None, Some(table))
             }
             State::Files { dir, .. } => {
                 // Obtain list of files
                 let files = list_dir(dir, !mgmt.config.show_hidden_files);
-                ((None, None), Some(files))
+                ((None, None), Some(files), None)
             }
-            State::Empty => ((None, None), None),
+            State::Empty => ((None, None), None, None),
         };
         std::mem::drop(mgmt);
         // Do render
@@ -538,8 +772,14 @@ impl Ui {
                 let selection = self.state().get_selection();
                 if let Some(row) = tracks.as_ref().unwrap().get(line as usize) {
                     let is_selected = selection == line.into();
-                    let is_playing =
-                        mgmt.playlist.current_id() == Some(keys.as_ref().unwrap()[line as usize]);
+                    let this_id = keys
+                        .as_ref()
+                        .unwrap()
+                        .get(line as usize)
+                        .and_then(|i| Some(*i));
+                    let is_playing = mgmt.playlist.is_ready()
+                        && self.ptr == self.play_ptr
+                        && mgmt.playlist.current_id() == this_id;
                     // Set up formatting for list
                     if is_selected {
                         queue!(self.stdout, SetBg(Color::DarkGrey))?;
@@ -551,6 +791,9 @@ impl Ui {
                     queue!(self.stdout, Print(row))?;
                     // Reset formatting for next row
                     queue!(self.stdout, SetBg(Color::Reset), SetFg(Color::Reset))?;
+                } else if line == 0 {
+                    // Print out placeholder
+                    queue!(self.stdout, Print("[empty library]"))?;
                 }
             } else if line != status_idx && self.state().is_files() {
                 let selection = self.state().get_selection();
@@ -564,6 +807,13 @@ impl Ui {
                     queue!(self.stdout, Print(row))?;
                     // Reset formatting for next row
                     queue!(self.stdout, SetBg(Color::Reset))?;
+                }
+            } else if line != status_idx && self.state().is_sorted_library() {
+                if let Some(row) = artist_track.as_ref().unwrap().get(line as usize) {
+                    // Add padding
+                    let row = format!("{:<pad$}", row, pad = self.size.width as usize);
+                    queue!(self.stdout, Print(row))?;
+                    queue!(self.stdout, SetBg(Color::Reset), SetFg(Color::Reset))?;
                 }
             } else if line == status_idx {
                 // Render status line
@@ -655,6 +905,7 @@ impl Ui {
 
     pub fn clean(&mut self) -> Result<()> {
         // Clean up before leaving
+        self.mgmt.lock().unwrap().database.write();
         execute!(self.stdout, terminal::LeaveAlternateScreen, cursor::Show)?;
         terminal::disable_raw_mode()?;
         Ok(())

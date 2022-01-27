@@ -2,9 +2,11 @@
 use crate::config::{Config, Database};
 use crate::playlist::PlayList;
 use crate::track::{Tag, Track};
+use crate::util::form_library_tree;
 use gstreamer::prelude::*;
 use gstreamer::ClockTime;
 use gstreamer_player::{Player, PlayerGMainContextSignalDispatcher, PlayerSignalDispatcher};
+use std::collections::HashMap;
 use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
@@ -47,6 +49,7 @@ pub struct Manager {
     pub mpris: Receiver<crate::mpris::Event>,
     pub config: Config,
     pub database: Database,
+    pub library_tree: HashMap<String, HashMap<String, Vec<usize>>>,
     // TODO: Replace use of channels with mutexes on this variable.
     pub updated: bool,
 }
@@ -61,6 +64,9 @@ impl Manager {
         let (_, rx) = mpsc::sync_channel(32);
         // Placeholder channel
         let (tx2, _) = mpsc::channel();
+        // Get config and generate library tree
+        let database = Database::open();
+        let library_tree = form_library_tree(&database.tracks);
         // Initiate player
         Self {
             // Create player
@@ -81,7 +87,8 @@ impl Manager {
             update_transmit: tx2,
             // Load in config file and library database
             config: Config::open(),
-            database: Database::open(),
+            database,
+            library_tree,
             // Updated flag for UI
             updated: false,
         }
@@ -165,7 +172,6 @@ impl Manager {
     pub fn new_playlist(&mut self, name: &str) {
         // Create a new playlist
         self.database.playlists.insert(name.to_string(), vec![]);
-        self.database.write();
     }
 
     pub fn list_playlist(&mut self, name: &str) -> String {
@@ -194,7 +200,6 @@ impl Manager {
         // Rename a playlist to something else
         if let Some(val) = self.database.playlists.remove(old) {
             self.database.playlists.insert(new.to_string(), val);
-            self.database.write();
         } else {
             println!("ERROR: Couldn't find playlist: {}", old);
         }
@@ -202,9 +207,7 @@ impl Manager {
 
     pub fn delete_playlist(&mut self, name: &str) {
         // Delete a playlist
-        if self.database.playlists.remove(name).is_some() {
-            self.database.write();
-        } else {
+        if self.database.playlists.remove(name).is_none() {
             println!("ERROR: Couldn't find playlist: {}", name);
         }
     }
@@ -213,7 +216,6 @@ impl Manager {
         if let Some(load) = self.database.playlists.get_mut(playlist) {
             if self.database.tracks.len() > track {
                 load.push(track);
-                self.database.write();
             } else {
                 println!("ERROR: Track ID out of range: {}", track);
             }
@@ -225,7 +227,6 @@ impl Manager {
     pub fn remove_from_playlist(&mut self, playlist: &str, idx: usize) {
         if let Some(load) = self.database.playlists.get_mut(playlist) {
             load.remove(idx);
-            self.database.write();
         } else {
             println!("ERROR: Couldn't find playlist: {}", playlist);
         }
@@ -434,26 +435,26 @@ impl Manager {
         }
         let result = result.unwrap_or(i);
         self.database.tracks.insert(result, track);
-        self.database.write();
+        self.database.display.push(result);
         result
     }
 
     pub fn remove_library(&mut self, id: usize) {
         // Remove a track from the library
         self.database.tracks.remove(&id);
+        let display_idx = self.database.display.iter().position(|x| *x == id).unwrap();
+        self.database.display.remove(display_idx);
         for values in self.database.playlists.values_mut() {
             if let Some(idx) = values.iter().position(|x| *x == id) {
                 values.remove(idx);
             }
         }
-        self.database.write();
     }
 
     pub fn set_title(&mut self, id: usize, new: &str) {
         // Set the title of a track
         if let Some(track) = self.database.tracks.get_mut(&id) {
             track.set_title(new);
-            self.database.write();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
         }
@@ -463,7 +464,6 @@ impl Manager {
         // Set the album of a track
         if let Some(track) = self.database.tracks.get_mut(&id) {
             track.set_album(new);
-            self.database.write();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
         }
@@ -473,7 +473,6 @@ impl Manager {
         // Set the artist of a track
         if let Some(track) = self.database.tracks.get_mut(&id) {
             track.set_artist(new);
-            self.database.write();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
         }
@@ -483,7 +482,6 @@ impl Manager {
         // Set the year of a track
         if let Some(track) = self.database.tracks.get_mut(&id) {
             track.set_year(new);
-            self.database.write();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
         }
@@ -493,7 +491,6 @@ impl Manager {
         // Reread the tags of a track
         if let Some(track) = self.database.tracks.get_mut(&id) {
             track.update();
-            self.database.write();
         } else {
             println!("ERROR: Track ID out of range: {}", id);
         }

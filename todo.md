@@ -8,13 +8,15 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] Set up artist -> album -> track sorting through tui on pane 1 (0.11.0)
 - [ ] Set up playlist mode on pane 2 (0.12.0)
 - [ ] Music discovery on pane 5 (0.13.0)
 - [ ] Tag guessing via Spotify / Deezer API (0.14.0)
 - [ ] LastFM scrobbling (0.15.0)
 - [ ] Track sorting (0.16.0)
 - [ ] Make highly configurable through config file (0.17.0)
+- [ ] Optimisation (0.17)
+    - [ ] Remove use of channels
+    - [ ] Provided stripped binaries
 - [x] Queueing (0.2.0)
 - [x] Set up config file (0.3.0)
 - [x] Allow creation of playlists (0.4.0)
@@ -24,3 +26,4 @@
 - [x] Set up file browsing on pane 4 (0.8.0)
 - [x] Link up library editing through tui (0.9.0)
 - [x] ID3 tag editing in library view (0.10.0)
+- [x] Set up artist -> album -> track sorting through tui on pane 1 (0.11.0)

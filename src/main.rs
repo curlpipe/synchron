@@ -51,6 +51,17 @@ fn main() {
 }
 
 fn start_tui() {
+    // Handle any panics that may occur
+    std::panic::set_hook(Box::new(|e| {
+        crossterm::terminal::disable_raw_mode().unwrap();
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        )
+        .ok();
+        eprintln!("{}", e);
+    }));
     // Build and initialise a manager
     let mut m = Manager::new();
     m.init();
@@ -156,7 +167,10 @@ fn start_cli() {
             ["seek", "backward"] => m.seek(false, Duration::from_secs(5)),
             ["seek", "forward"] => m.seek(true, Duration::from_secs(5)),
             // Exit player
-            ["exit"] => std::process::exit(0),
+            ["exit"] => {
+                m.database.write();
+                std::process::exit(0)
+            }
             // Unknown command
             _ => println!("Unknown command: '{}'", cmd),
         }
