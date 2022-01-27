@@ -1,6 +1,8 @@
 # Synchron
 > A terminal music player
 
+<img src="https://github.com/curlpipe/synchron/blob/master/assets/screenshot.png?raw=true"></img>
+
 # Installation
 This requires gstreamer as well as it's plugins and development libraries.
 You will also need a dbus session running in order to use the MPRIS capabilities.
