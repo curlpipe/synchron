@@ -21,7 +21,10 @@
     - [ ] Implement scrolling in track side
 - [ ] Implement scrolling in file browser (0.12.4)
 - [ ] Make sure track ptr operations are applied to all states (0.12.5)
-- [ ] Refactor, ensure documentation, comments, stop annoying function chain space wastage, rustfmt, clippy (0.12.6)
+- [ ] Check tag update effect on sorted library view (0.12.6)
+- [ ] Allow for tags to be edited from the playlist view (0.12.7)
+- [ ] Refactor, ensure documentation, comments, stop annoying function chain space wastage, rustfmt, clippy (0.12.8)
+<!-- End of bug fixing marathon -->
 - [ ] Music download on pane 5 (0.13.0)
     - [ ] Allow for configuration of external applications
     - [ ] Create deezer downloading "plugin"
