@@ -1,7 +1,9 @@
 # Synchron
 > A terminal music player
-
+> 
 <img src="https://github.com/curlpipe/synchron/blob/master/assets/screenshot.png?raw=true"></img>
+<img src="https://github.com/curlpipe/synchron/blob/master/assets/screenshot1.png?raw=true"></img>
+<img src="https://github.com/curlpipe/synchron/blob/master/assets/screenshot2.png?raw=true"></img>
 
 # Installation
 This requires gstreamer as well as it's plugins and development libraries.
