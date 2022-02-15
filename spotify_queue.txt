@@ -1,0 +1,18 @@
+Spotify's queue implementation:
+
+The queue has two parts:
+1. Immediate queue
+    When the user queues a track, it is added here
+2. Playlist queue
+    When the user plays a playlist, then the next and previous tracks
+    are stored on this queue
+
+On the event of a playlist insertion or deletion:
+    Universal playlist pointer updates to ensure that it still points to the currently playing track,
+    deletes the deleted track from the universal playlist too.
+On the event of a next instruction:
+    Checks to see if the Immediate queue is empty, if it is, then it will just take from the playlist queue,
+    If the Immediate queue is not empty, it will play from that, and as soon as it is played, that song is removed
+    from immediate queue and is never able to be reached through either back or forward.
+On the event of a back instruction:
+    Just takes from the playlist queue, ignores immediate queue history as tracks are deleted immediately on play.

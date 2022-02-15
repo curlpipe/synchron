@@ -8,6 +8,7 @@
 
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::cast_sign_loss)]
+#![feature(hash_drain_filter)]
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -206,8 +207,11 @@ fn spawn_mpris(m: &Arc<Mutex<Manager>>) {
                 }
 
                 // Stop status after track has finished
+                let status = m.metadata.lock().unwrap().playback_status;
                 #[allow(clippy::float_cmp)]
-                if m.get_position().unwrap_or((0, 0, 0.0)).2 == 1. {
+                if m.get_position().unwrap_or((0, 0, 0.0)).2 == 1.
+                    && status != PlaybackStatus::Stopped
+                {
                     m.metadata.lock().unwrap().playback_status = PlaybackStatus::Stopped;
                     m.next();
                     m.update();

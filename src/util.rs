@@ -1,8 +1,7 @@
 // util.rs - common utilities for helping out around the project
 use crate::track::Track;
 use crate::ui::{Color, SetBg, SetFg};
-use crossterm::style::{Attribute as Attr, SetAttribute as SetAttr};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use unicode_width::UnicodeWidthStr;
 
 // Help text
@@ -163,6 +162,17 @@ pub fn find_longest(target: &[&String]) -> usize {
     longest
 }
 
+pub fn find_longest_no_ref(target: &[String]) -> usize {
+    // Find the longest string in a vector
+    let mut longest = 0;
+    for i in target {
+        if i.width() > longest {
+            longest = i.width();
+        }
+    }
+    longest
+}
+
 pub fn align_left(target: &str, space: usize) -> String {
     let pad = " ".repeat(space.saturating_sub(target.width()));
     format!("{}{}", target, pad)
@@ -201,9 +211,9 @@ pub fn list_dir(path: &str, no_hidden: bool) -> Vec<String> {
 
 pub fn form_library_tree(
     tracks: &HashMap<usize, Track>,
-) -> HashMap<String, HashMap<String, Vec<usize>>> {
+) -> BTreeMap<String, BTreeMap<String, Vec<usize>>> {
     // Create a library tree from a list of tracks
-    let mut result: HashMap<String, HashMap<String, Vec<usize>>> = HashMap::new();
+    let mut result: BTreeMap<String, BTreeMap<String, Vec<usize>>> = BTreeMap::new();
     for (id, track) in tracks {
         if let Some(albums) = result.get_mut(&track.tag.artist) {
             if let Some(tracks) = albums.get_mut(&track.tag.album) {
@@ -215,7 +225,7 @@ pub fn form_library_tree(
             }
         } else {
             // Create new key value pair
-            result.insert(track.tag.artist.clone(), HashMap::new());
+            result.insert(track.tag.artist.clone(), BTreeMap::new());
             result
                 .get_mut(&track.tag.artist)
                 .unwrap()
@@ -226,24 +236,23 @@ pub fn form_library_tree(
 }
 
 pub fn format_artist_track(
-    listing: &HashMap<String, HashMap<String, Vec<usize>>>,
-    selection: (usize, usize, &HashMap<usize, usize>),
+    listing: &BTreeMap<String, BTreeMap<String, Vec<usize>>>,
+    selection: (String, &HashMap<String, usize>),
     focus: u8,
     lookup: &HashMap<usize, Track>,
     playing: Option<usize>,
+    playing_here: bool,
 ) -> Vec<String> {
     let mut result = vec![];
-    let (artist_ptr, album_ptr, track_ptr) = selection;
+    let (artist_ptr, track_ptr) = selection;
     // Gather list of artists
     let mut artists: Vec<&String> = listing.keys().collect();
-    artists.sort();
     // Gather list of selected artist's albums
-    let mut albums: Vec<&String> = listing[artists[artist_ptr]].keys().collect();
-    albums.sort();
+    let albums: Vec<&String> = listing[&artist_ptr].keys().collect();
     // Gather years for albums
     let mut years = vec![];
     for album in &albums {
-        let artist = &listing[artists[artist_ptr]];
+        let artist = &listing[&artist_ptr];
         let album = &artist[*album];
         let track_id = album[0];
         years.push(lookup[&track_id].tag.year.to_string());
@@ -251,7 +260,7 @@ pub fn format_artist_track(
     // Gather list of all tracks from this artist
     let mut tracks: Vec<usize> = vec![];
     for album in &albums {
-        let this = &listing[artists[artist_ptr]][*album];
+        let this = &listing[&artist_ptr][*album];
         for track in this {
             tracks.push(*track);
         }
@@ -268,9 +277,9 @@ pub fn format_artist_track(
             year,
             SetFg(Color::Reset)
         ));
-        let this = &listing[artists[artist_ptr]][*album];
+        let this = &listing[&artist_ptr][*album];
         for track in this {
-            let track_title = if Some(*track) == playing {
+            let track_title = if Some(*track) == playing && playing_here {
                 format!(
                     "{}{}{}",
                     SetFg(Color::Green),
@@ -298,16 +307,23 @@ pub fn format_artist_track(
         }
     }
     // Fill spaces
-    if artists.len() > albums.len() {
-        let left = artists.len() - albums.len();
+    if artists.len() > result.len() {
+        let left = artists.len() - result.len();
         for _ in 0..left {
             result.push("".to_string());
+        }
+    }
+    let empty = "".to_string();
+    if result.len() > artists.len() {
+        let left = result.len() - artists.len();
+        for _ in 0..left {
+            artists.push(&empty);
         }
     }
     // Splice lhs of table
     let pad = find_longest(&artists);
     for (row, artist) in result.iter_mut().zip(&artists) {
-        if artist == &artists[artist_ptr] {
+        if **artist == artist_ptr {
             if focus == 0 {
                 *row = format!(
                     "{}{}{} {}",
@@ -333,17 +349,111 @@ pub fn format_artist_track(
 }
 
 pub fn artist_tracks(
-    listing: &HashMap<String, HashMap<String, Vec<usize>>>,
-    artist: usize,
+    listing: &BTreeMap<String, BTreeMap<String, Vec<usize>>>,
+    artist: &String,
 ) -> Vec<usize> {
-    let mut artists: Vec<&String> = listing.keys().collect();
-    artists.sort();
-    let mut albums: Vec<&String> = listing[artists[artist]].keys().collect();
-    albums.sort();
+    let albums: Vec<&String> = listing[artist].keys().collect();
     let mut result = vec![];
     for album in albums {
-        for track in &listing[artists[artist]][album] {
+        for track in &listing[artist][album] {
             result.push(*track);
+        }
+    }
+    result
+}
+
+pub fn format_playlist(
+    playlist: &HashMap<String, Vec<usize>>,
+    display: &Vec<String>,
+    focus: u8,
+    lookup: &HashMap<usize, Track>,
+    selection: (&String, &HashMap<String, usize>),
+    up_ptr: Option<usize>,
+    playing_playlist: &Option<String>,
+    width: u16,
+    icon: &str,
+) -> Vec<String> {
+    let (selection, track_ptr) = selection;
+    let mut result = vec![];
+    let longest = find_longest_no_ref(display);
+    if playlist.is_empty() {
+        return vec![
+            "No playlists have been created yet".to_string(),
+            "Press `n` to create one!".to_string(),
+        ];
+    }
+    let this = &playlist[selection];
+    // Format lhs
+    for name in display.iter() {
+        if name == selection && focus == 0 {
+            result.push(format!(
+                "{}{} {}{} {} {} {}│{}",
+                SetBg(Color::DarkGrey),
+                SetFg(Color::DarkBlue),
+                icon,
+                SetFg(Color::Reset),
+                align_left(name, longest),
+                SetBg(Color::Reset),
+                SetFg(Color::DarkBlue),
+                SetFg(Color::Reset)
+            ));
+        } else if name == selection && focus == 1 {
+            result.push(format!(
+                " {}{} {}  │{}",
+                SetFg(Color::DarkBlue),
+                icon,
+                align_left(name, longest),
+                SetFg(Color::Reset)
+            ));
+        } else {
+            result.push(format!(
+                " {} {}  {}│{}",
+                icon,
+                align_left(name, longest),
+                SetFg(Color::DarkBlue),
+                SetFg(Color::Reset)
+            ));
+        }
+    }
+    // Fill spaces
+    if this.len() > result.len() {
+        let left = this.len() - result.len();
+        for _ in 0..left {
+            result.push(format!(
+                "{} {}│{}",
+                " ".repeat(longest + icon.width() + 3),
+                SetFg(Color::DarkBlue),
+                SetFg(Color::Reset)
+            ));
+        }
+    }
+    // Generate rhs table
+    let tracks: Vec<&Track> = this.iter().map(|x| &lookup[x]).collect();
+    let table = pad_table(
+        format_table(&tracks),
+        (width as usize).saturating_sub(longest + icon.width() + 6),
+    );
+    // Format rhs
+    for c in 0..std::cmp::max(result.len(), this.len()) {
+        let line = result.get_mut(c).unwrap();
+        let track = table.get(c);
+        let this_row = up_ptr == Some(c);
+        let empty = "".to_string();
+        let text = if let Some(line) = track { line } else { &empty };
+        let title = if this_row && &Some(selection.to_string()) == playing_playlist {
+            format!("{}{}{}", SetFg(Color::Green), text, SetFg(Color::Reset))
+        } else {
+            text.to_string()
+        };
+        if track_ptr[selection] == c && focus == 1 {
+            *line += &format!(
+                " {}{}{}",
+                SetBg(Color::DarkGrey),
+                title,
+                SetBg(Color::Reset)
+            );
+        } else {
+            *line += &format!(" {}", title);
         }
     }
     result

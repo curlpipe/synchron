@@ -64,6 +64,11 @@ order to use synchron.
 | <kbd>m</kbd>                       | Toggle mute.                              |
 | <kbd>Shift</kbd> + <kbd>Up</kbd>   | Volume up.                                |
 | <kbd>Shift</kbd> + <kbd>Down</kbd> | Volume down.                              |
+| <kbd>a</kbd>                       | Add to playlist.                          |
+| <kbd>r</kbd>                       | Remove from playlist.                     |
+| <kbd>n</kbd>                       | Create playlist.                          |
+| <kbd>d</kbd> (In playlist pane)    | Delete playlist.                          |
+| <kbd>k</kbd>                       | Rename playlist.                          |
 | <kbd>;</kbd> OR <kbd>:</kbd>       | Open command mode within TUI mode.        |
 | <kbd>1</kbd>                       | Go to sorted library view.                |
 | <kbd>2</kbd>                       | Go to simple library view.                |

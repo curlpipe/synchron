@@ -17,14 +17,14 @@
         1: SortedLibrary,
         // SimpleLibrary: A single list of all your music. Ideal for updating tags and playing all your music.
         2: SimpleLibrary,
-        // Empty: An empty pane for demonstration purposes
-        3: Empty,
+        // Playlists: A pane to build mixtapes of your favourite music and play them back.
+        3: Playlists,
         // Files: A file browser to add to your library
         4: Files,
     },
 
     // The pane number to start on when opening synchron
-    open_on_pane: 1,
+    open_on_pane: 3,
 
     // Indicators / Icons for the TUI
     indicators: {
@@ -42,6 +42,7 @@
         "stopped": "栗",
         "progress_bar_full": "",
         "progress_bar_empty": " ",
+        "playlist_icon": " ",
     },
 
     // If true, then hidden files and folders will be shown in the files pane, otherwise they will be hidden

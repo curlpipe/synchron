@@ -6,7 +6,7 @@ use crate::util::form_library_tree;
 use gstreamer::prelude::*;
 use gstreamer::ClockTime;
 use gstreamer_player::{Player, PlayerGMainContextSignalDispatcher, PlayerSignalDispatcher};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc, Mutex,
@@ -49,7 +49,7 @@ pub struct Manager {
     pub mpris: Receiver<crate::mpris::Event>,
     pub config: Config,
     pub database: Database,
-    pub library_tree: HashMap<String, HashMap<String, Vec<usize>>>,
+    pub library_tree: BTreeMap<String, BTreeMap<String, Vec<usize>>>,
     // TODO: Replace use of channels with mutexes on this variable.
     pub updated: bool,
 }
@@ -172,6 +172,7 @@ impl Manager {
     pub fn new_playlist(&mut self, name: &str) {
         // Create a new playlist
         self.database.playlists.insert(name.to_string(), vec![]);
+        self.database.display.playlists.push(name.to_string());
     }
 
     pub fn list_playlist(&mut self, name: &str) -> String {
@@ -200,6 +201,15 @@ impl Manager {
         // Rename a playlist to something else
         if let Some(val) = self.database.playlists.remove(old) {
             self.database.playlists.insert(new.to_string(), val);
+            // Update playlist display
+            let idx = self
+                .database
+                .display
+                .playlists
+                .iter()
+                .position(|x| x == old)
+                .unwrap();
+            *self.database.display.playlists.get_mut(idx).unwrap() = new.to_string();
         } else {
             println!("ERROR: Couldn't find playlist: {}", old);
         }
@@ -209,6 +219,14 @@ impl Manager {
         // Delete a playlist
         if self.database.playlists.remove(name).is_none() {
             println!("ERROR: Couldn't find playlist: {}", name);
+        } else if let Some(idx) = self
+            .database
+            .display
+            .playlists
+            .iter()
+            .position(|x| x == name)
+        {
+            self.database.display.playlists.remove(idx);
         }
     }
 
@@ -435,15 +453,23 @@ impl Manager {
         }
         let result = result.unwrap_or(i);
         self.database.tracks.insert(result, track);
-        self.database.display.push(result);
+        self.database.display.simple.push(result);
         result
     }
 
     pub fn remove_library(&mut self, id: usize) {
         // Remove a track from the library
         self.database.tracks.remove(&id);
-        let display_idx = self.database.display.iter().position(|x| *x == id).unwrap();
-        self.database.display.remove(display_idx);
+        // Remove from display
+        let display_idx = self
+            .database
+            .display
+            .simple
+            .iter()
+            .position(|x| *x == id)
+            .unwrap();
+        self.database.display.simple.remove(display_idx);
+        // Remove from playlists
         for values in self.database.playlists.values_mut() {
             if let Some(idx) = values.iter().position(|x| *x == id) {
                 values.remove(idx);

@@ -5,7 +5,8 @@ use crate::Track;
 pub struct PlayList {
     tracks: Vec<Track>,
     pub ids: Vec<usize>,
-    ptr: Option<usize>,
+    pub ptr: Option<usize>,
+    pub name: Option<String>,
 }
 
 impl PlayList {
@@ -51,18 +52,18 @@ impl PlayList {
 
     pub fn next(&mut self) -> Option<Track> {
         // Switch to the next track in the queue
-        if self.get_ptr() + 1 >= self.tracks.len() {
+        if self.ptr? + 1 >= self.tracks.len() {
             None
         } else {
-            self.ptr = Some(self.get_ptr() + 1);
+            self.ptr = Some(self.ptr? + 1);
             self.current()
         }
     }
 
     pub fn previous(&mut self) -> Option<Track> {
         // Switch to the previously played track
-        if self.get_ptr() > 0 {
-            self.ptr = Some(self.get_ptr() - 1);
+        if self.ptr? > 0 {
+            self.ptr = Some(self.ptr? - 1);
             self.current()
         } else {
             None
@@ -71,7 +72,7 @@ impl PlayList {
 
     pub fn current_id(&self) -> Option<usize> {
         // Get the currently playing track ID
-        Some(*self.ids.get(self.get_ptr())?)
+        Some(*self.ids.get(self.ptr?)?)
     }
 
     pub fn current(&self) -> Option<Track> {
@@ -79,7 +80,7 @@ impl PlayList {
         if !self.is_ready() {
             return None;
         }
-        Some(self.tracks.get(self.get_ptr())?.clone())
+        Some(self.tracks.get(self.ptr?)?.clone())
     }
 
     pub fn is_ready(&self) -> bool {

@@ -3,8 +3,8 @@ use crate::audio::{LoopStatus, Manager, PlaybackStatus};
 use crate::config::{Pane, PULSE};
 use crate::track::Track;
 use crate::util::{
-    align_sides, artist_tracks, expand_path, form_library_tree, format_artist_track, format_table,
-    is_file, list_dir, pad_table, timefmt,
+    align_sides, artist_tracks, expand_path, form_library_tree, format_artist_track,
+    format_playlist, format_table, is_file, list_dir, pad_table, timefmt,
 };
 pub use crossterm::{
     cursor,
@@ -49,9 +49,13 @@ pub enum State {
     },
     SortedLibrary {
         depth: u8,
-        artist: usize,
-        album: usize,
-        track: HashMap<usize, usize>,
+        artist: String,
+        track: HashMap<String, usize>,
+    },
+    Playlists {
+        depth: u8,
+        playlist: String,
+        track: HashMap<String, usize>,
     },
     Empty,
 }
@@ -69,23 +73,15 @@ impl State {
         matches!(self, Self::SortedLibrary { .. })
     }
 
+    pub fn is_playlists(&self) -> bool {
+        matches!(self, Self::Playlists { .. })
+    }
+
     pub fn get_selection(&self) -> usize {
         match self {
             Self::Library { selection, .. } => *selection,
             Self::Files { selection, .. } => *selection,
-            Self::SortedLibrary {
-                artist,
-                track,
-                depth,
-                ..
-            } => {
-                if *depth == 0 {
-                    *artist
-                } else {
-                    track[artist]
-                }
-            }
-            Self::Empty => unreachable!(),
+            _ => unreachable!(),
         }
     }
 }
@@ -106,11 +102,28 @@ impl Ui {
         // Create new UI
         let mgmt = m.lock().unwrap();
         // Create track pointers for artists
-        let artists = mgmt.library_tree.keys().len();
         let mut track = HashMap::new();
-        for i in 0..artists {
-            track.insert(i, 0);
+        let first_artist = mgmt
+            .library_tree
+            .keys()
+            .next()
+            .and_then(|x| Some(x.to_string()))
+            .unwrap_or_else(|| "".to_string());
+        for artist in mgmt.library_tree.keys() {
+            track.insert(artist.clone(), 0);
         }
+        // Create initial playlist data
+        let mut playlist_ptrs = HashMap::new();
+        for playlist in mgmt.database.playlists.keys() {
+            playlist_ptrs.insert(playlist.to_string(), 0);
+        }
+        let playlist = mgmt
+            .database
+            .display
+            .playlists
+            .get(0)
+            .and_then(|n| Some(n.to_string()))
+            .unwrap_or_else(|| "".to_string());
         // Set up states
         let mut states = HashMap::default();
         for (key, pane) in &mgmt.config.panes {
@@ -121,8 +134,7 @@ impl Ui {
                     Pane::SortedLibrary => State::SortedLibrary {
                         depth: 0,
                         track: track.clone(),
-                        album: 0,
-                        artist: 0,
+                        artist: first_artist.clone(),
                     },
                     Pane::Files => {
                         let dir = expand_path("~/").unwrap_or_else(|| ".".to_string());
@@ -132,6 +144,11 @@ impl Ui {
                             dir,
                         }
                     }
+                    Pane::Playlists => State::Playlists {
+                        depth: 0,
+                        track: playlist_ptrs.clone(),
+                        playlist: playlist.to_string(),
+                    },
                     Pane::Empty => State::Empty,
                 },
             );
@@ -162,6 +179,7 @@ impl Ui {
         // Run the UI
         self.render()?;
         while self.active {
+            let status = get_md!(self.mgmt).playback_status;
             if event::poll(std::time::Duration::from_millis(PULSE))? {
                 match event::read()? {
                     Event::Key(k) => self.on_key(k),
@@ -175,10 +193,8 @@ impl Ui {
             } else if self.mgmt.lock().unwrap().updated {
                 self.mgmt.lock().unwrap().updated = false;
                 self.render()?;
-            }
-            // Rerender the status line if playing, to keep up with the position of the song
-            let status = get_md!(self.mgmt).playback_status;
-            if status == PlaybackStatus::Playing {
+            } else if status == PlaybackStatus::Playing {
+                // Rerender the status line if playing, to keep up with the position of the song
                 let status_idx = self.size.height.saturating_sub(1);
                 queue!(
                     self.stdout,
@@ -216,8 +232,14 @@ impl Ui {
             (KMod::NONE, KCode::Char('c')) => self.mgmt.lock().unwrap().play(),
             // [v] : Pause playback
             (KMod::NONE, KCode::Char('v')) => self.mgmt.lock().unwrap().pause(),
-            // [d] : Delete from library
-            (KMod::NONE, KCode::Char('d')) => self.remove(),
+            // [d] : Delete from library / Delete playlist
+            (KMod::NONE, KCode::Char('d')) => {
+                if self.state().is_playlists() {
+                    self.delete_playlist();
+                } else {
+                    self.remove();
+                }
+            }
             // [e] : Edit tag of selected song
             (KMod::NONE, KCode::Char('e')) => self.tag_edit().unwrap_or(()),
             // [Enter] : Play selection / Add track to library
@@ -266,6 +288,14 @@ impl Ui {
             }
             // [Tab] : Recurse deeper into sorted library
             (KMod::NONE, KCode::Tab) => self.deepen(),
+            // [a] : Add to playlist
+            (KMod::NONE, KCode::Char('a')) => self.add_to_playlist(),
+            // [r] : Remove from playlist
+            (KMod::NONE, KCode::Char('r')) => self.remove_from_playlist(),
+            // [n] : New playlist
+            (KMod::NONE, KCode::Char('n')) => self.create_playlist(),
+            // [k] : Rename playlist
+            (KMod::NONE, KCode::Char('k')) => self.rename_playlist(),
             // [;] or [:] : Command mode
             (KMod::NONE, KCode::Char(':' | ';')) => (),
             // [???] : Do nothing
@@ -273,30 +303,206 @@ impl Ui {
         }
     }
 
+    fn create_playlist(&mut self) {
+        // Create new playlist
+        if let Ok(Some(name)) = self.get_input("Playlist name: ") {
+            if name.is_empty() {
+                return;
+            }
+            self.states.iter_mut().for_each(|(_, s)| {
+                if let State::Playlists {
+                    track, playlist: p, ..
+                } = s
+                {
+                    track.insert(name.clone(), 0);
+                    if p.is_empty() {
+                        // Fix empty track pointer
+                        *p = name.clone();
+                    }
+                }
+            });
+            self.mgmt.lock().unwrap().new_playlist(&name);
+        }
+    }
+
+    fn delete_playlist(&mut self) {
+        // Delete playlist
+        if let State::Playlists {
+            depth: 0, playlist, ..
+        } = self.state()
+        {
+            if playlist.is_empty() {
+                return;
+            }
+            // Confirm user choice
+            let playlist = playlist.clone();
+            let warning = format!(
+                "WARNING: Are you sure you want '{}' to be deleted? (y/n): ",
+                playlist
+            );
+            if let Ok(Some(confirm)) = self.get_input(&warning) {
+                if confirm == "y" {
+                    // Move selection up
+                    self.selection_up();
+                    // Delete track pointers from playlist states
+                    self.states.iter_mut().for_each(|(_, s)| {
+                        if let State::Playlists {
+                            track, playlist: p, ..
+                        } = s
+                        {
+                            // Do removal
+                            track.remove(&playlist);
+                            if self.mgmt.lock().unwrap().database.display.playlists.get(0)
+                                == Some(&playlist)
+                            {
+                                // Pointer needs fixing
+                                *p = self
+                                    .mgmt
+                                    .lock()
+                                    .unwrap()
+                                    .database
+                                    .display
+                                    .playlists
+                                    .get(1)
+                                    .and_then(|x| Some(x.to_string()))
+                                    .unwrap_or_else(|| "".to_string());
+                            }
+                        }
+                    });
+                    // Do deletion
+                    self.mgmt.lock().unwrap().delete_playlist(&playlist);
+                }
+            }
+        }
+    }
+
+    fn rename_playlist(&mut self) {
+        // Rename playlist
+        if let State::Playlists {
+            depth: 0, playlist, ..
+        } = self.state()
+        {
+            if playlist.is_empty() {
+                return;
+            }
+            // Get new playlist name
+            let playlist = playlist.clone();
+            let msg = format!("Rename '{}' to: ", playlist);
+            if let Ok(Some(new)) = self.get_input(&msg) {
+                if new.is_empty() {
+                    return;
+                }
+                // Rename track pointers
+                self.states.iter_mut().for_each(|(_, s)| {
+                    if let State::Playlists {
+                        track, playlist: p, ..
+                    } = s
+                    {
+                        // Update playlist pointer if necessary
+                        if *p == playlist {
+                            *p = new.to_string();
+                        }
+                        let old: usize = track.remove(&playlist).unwrap();
+                        track.insert(new.to_string(), old);
+                    }
+                });
+                // Do renaming
+                self.mgmt.lock().unwrap().rename_playlist(&playlist, &new);
+            }
+        }
+    }
+
+    fn add_to_playlist(&mut self) {
+        // Add song to playlist from simple library pane
+        if let Some(id) = self.get_selected_id() {
+            // Get the desired playlist that the user wants to add to
+            if let Ok(Some(playlist)) = self.get_input("Playlist name: ") {
+                // Check the playlist exists
+                if self
+                    .mgmt
+                    .lock()
+                    .unwrap()
+                    .database
+                    .playlists
+                    .contains_key(&playlist)
+                {
+                    self.mgmt.lock().unwrap().add_to_playlist(&playlist, id);
+                }
+            }
+        }
+    }
+
+    fn remove_from_playlist(&mut self) {
+        let mut fix_selection = false;
+        if let State::Playlists {
+            playlist,
+            track,
+            depth,
+        } = self.state()
+        {
+            if playlist.is_empty() {
+                return;
+            }
+            let length = self.mgmt.lock().unwrap().database.playlists[playlist].len();
+            if length == 0 {
+                return;
+            }
+            // Differentiate between deleting playlists and deleting tracks from playlists
+            if depth == &1 {
+                self.mgmt
+                    .lock()
+                    .unwrap()
+                    .remove_from_playlist(playlist, track[playlist]);
+            }
+            // Determine if selection needs fixing (out of bounds)
+            if track[playlist] > length.saturating_sub(2) {
+                fix_selection = true;
+            }
+        }
+        if fix_selection {
+            self.selection_up();
+        }
+    }
+
     fn get_selected_id(&self) -> Option<usize> {
         // Get the track id that is selected (state independent)
         Some(match self.state() {
             State::Library { selection, .. } => {
-                self.mgmt.lock().unwrap().database.display[*selection]
+                self.mgmt.lock().unwrap().database.display.simple[*selection]
             }
             State::SortedLibrary {
                 artist,
                 track,
                 depth: 1,
                 ..
-            } => artist_tracks(&self.mgmt.lock().unwrap().library_tree, *artist)[track[artist]],
+            } => artist_tracks(&self.mgmt.lock().unwrap().library_tree, artist)[track[artist]],
             _ => return None,
         })
     }
 
     fn deepen(&mut self) {
         // Switch focus in the sorted library view
-        if let State::SortedLibrary { depth, .. } = self.state_mut() {
-            if depth == &1 {
-                *depth = 0;
-            } else {
-                *depth += 1;
+        match self.state_mut() {
+            State::SortedLibrary { depth, .. } => {
+                if depth == &1 {
+                    *depth = 0;
+                } else {
+                    *depth += 1;
+                }
             }
+            State::Playlists {
+                depth, playlist, ..
+            } => {
+                if playlist.is_empty() {
+                    return;
+                }
+                if depth == &1 {
+                    *depth = 0;
+                } else {
+                    *depth += 1;
+                }
+            }
+            _ => (),
         }
     }
 
@@ -356,6 +562,7 @@ impl Ui {
                 Print(&out)
             )?;
             // Handle prompt input
+            let status = get_md!(self.mgmt).playback_status;
             if event::poll(std::time::Duration::from_millis(PULSE))? {
                 match event::read()? {
                     Event::Key(k) => match (k.modifiers, k.code) {
@@ -385,10 +592,8 @@ impl Ui {
             } else if self.mgmt.lock().unwrap().updated {
                 self.mgmt.lock().unwrap().updated = false;
                 self.render()?;
-            }
-            // Rerender the status line if playing, to keep up with the position of the song
-            let status = get_md!(self.mgmt).playback_status;
-            if status == PlaybackStatus::Playing {
+            } else if status == PlaybackStatus::Playing {
+                // Rerender the status line if playing, to keep up with the position of the song
                 let status_idx = self.size.height.saturating_sub(1);
                 queue!(
                     self.stdout,
@@ -409,13 +614,6 @@ impl Ui {
         // Switch modes
         if self.states.contains_key(&mode) {
             self.ptr = mode;
-        }
-        // Update library tree if necessary
-        if self.library_updated {
-            let mut mgmt = self.mgmt.lock().unwrap();
-            let tracks = &mgmt.database.tracks;
-            mgmt.library_tree = form_library_tree(tracks);
-            self.library_updated = false;
         }
     }
 
@@ -438,12 +636,12 @@ impl Ui {
         let mut selection_off = false;
         match self.state() {
             State::Library { selection, .. } => {
-                let mut mgmt = self.mgmt.lock().unwrap();
                 // Get track ID
                 if let Some(id) = self.get_selected_id() {
+                    let mut mgmt = self.mgmt.lock().unwrap();
                     mgmt.remove_library(id);
                     // Check for selection issues
-                    if selection > &mgmt.database.display.len().saturating_sub(2) {
+                    if selection > &mgmt.database.display.simple.len().saturating_sub(2) {
                         selection_off = true;
                     }
                     // Trigger library tree rerender
@@ -458,7 +656,7 @@ impl Ui {
             } => {
                 if *depth == 1 {
                     let mut mgmt = self.mgmt.lock().unwrap();
-                    let tracks = artist_tracks(&mgmt.library_tree, *artist);
+                    let tracks = artist_tracks(&mgmt.library_tree, artist);
                     // Get track ID
                     let id = tracks[track[artist]];
                     mgmt.remove_library(id);
@@ -483,11 +681,12 @@ impl Ui {
         match self.state() {
             State::Library { selection, .. } => {
                 let mut mgmt = self.mgmt.lock().unwrap();
+                mgmt.playlist.name = None;
                 // Ensure there are available tracks
                 if mgmt.database.tracks.is_empty() {
                     return;
                 }
-                let lookup = mgmt.database.display.clone();
+                let lookup = mgmt.database.display.simple.clone();
                 let tracks = lookup
                     .iter()
                     .map(|x| mgmt.database.tracks[x].clone())
@@ -500,7 +699,8 @@ impl Ui {
             }
             State::SortedLibrary { artist, track, .. } => {
                 let mut mgmt = self.mgmt.lock().unwrap();
-                let lookup = artist_tracks(&mgmt.library_tree, *artist);
+                mgmt.playlist.name = None;
+                let lookup = artist_tracks(&mgmt.library_tree, artist);
                 let tracks = lookup
                     .iter()
                     .map(|x| mgmt.database.tracks[x].clone())
@@ -533,6 +733,27 @@ impl Ui {
                     };
                 }
             }
+            State::Playlists {
+                playlist, track, ..
+            } => {
+                let mut mgmt = self.mgmt.lock().unwrap();
+                mgmt.playlist.name = Some(playlist.to_string());
+                if playlist.is_empty() {
+                    return;
+                }
+                let display = mgmt.database.playlists[playlist].clone();
+                if !display.is_empty() {
+                    let tracks = display
+                        .iter()
+                        .map(|x| mgmt.database.tracks[x].clone())
+                        .collect();
+                    let id = display[track[playlist]];
+                    mgmt.load(id);
+                    mgmt.playlist.set(track[playlist], tracks, display);
+                    self.play_ptr = self.ptr;
+                    mgmt.play();
+                }
+            }
             _ => (),
         }
     }
@@ -544,16 +765,55 @@ impl Ui {
         if mgmt.database.tracks.is_empty() {
             return;
         }
-        if let State::Library { selection, .. } = self.state() {
-            if *selection != 0 {
-                // Update database
-                mgmt.database
-                    .display
-                    .swap(*selection, selection.saturating_sub(1));
+        match self.state() {
+            State::Library { selection, .. } => {
+                if *selection != 0 {
+                    // Update database
+                    mgmt.database
+                        .display
+                        .simple
+                        .swap(*selection, selection.saturating_sub(1));
+                }
             }
+            State::Playlists {
+                depth,
+                playlist,
+                track,
+                ..
+            } => {
+                if playlist.is_empty() {
+                    return;
+                }
+                if *depth == 1 {
+                    // Moving track display order around
+                    let selection = track[playlist];
+                    if selection != 0 {
+                        mgmt.database
+                            .playlists
+                            .get_mut(playlist)
+                            .unwrap()
+                            .swap(selection, selection.saturating_sub(1));
+                        std::mem::drop(mgmt);
+                        self.selection_up();
+                    }
+                } else if *depth == 0 {
+                    // Moving playlist display order around
+                    let idx = mgmt
+                        .database
+                        .display
+                        .playlists
+                        .iter()
+                        .position(|x| x == playlist);
+                    if let Some(idx) = idx {
+                        mgmt.database
+                            .display
+                            .playlists
+                            .swap(idx, idx.saturating_sub(1));
+                    }
+                }
+            }
+            _ => (),
         }
-        std::mem::drop(mgmt);
-        self.selection_up();
     }
 
     fn track_down(&mut self) {
@@ -563,18 +823,71 @@ impl Ui {
         if mgmt.database.tracks.is_empty() {
             return;
         }
-        if let State::Library { selection, .. } = self.state() {
-            if *selection < mgmt.database.tracks.len().saturating_sub(1) {
-                // Update database
-                mgmt.database.display.swap(*selection, *selection + 1);
+        match self.state() {
+            State::Library { selection, .. } => {
+                if *selection < mgmt.database.tracks.len().saturating_sub(1) {
+                    // Update database
+                    mgmt.database
+                        .display
+                        .simple
+                        .swap(*selection, *selection + 1);
+                }
             }
+            State::Playlists {
+                depth,
+                playlist,
+                track,
+                ..
+            } => {
+                if playlist.is_empty() {
+                    return;
+                }
+                if *depth == 1 {
+                    // Move track display order around
+                    let selection = track[playlist];
+                    if selection < mgmt.database.playlists[playlist].len().saturating_sub(1) {
+                        mgmt.database
+                            .playlists
+                            .get_mut(playlist)
+                            .unwrap()
+                            .swap(selection, selection + 1);
+                        std::mem::drop(mgmt);
+                        self.selection_down();
+                    }
+                } else if *depth == 0 {
+                    // Moving playlist display order around
+                    let idx = mgmt
+                        .database
+                        .display
+                        .playlists
+                        .iter()
+                        .position(|x| x == playlist);
+                    if let Some(idx) = idx {
+                        if idx < mgmt.database.display.playlists.len().saturating_sub(1) {
+                            mgmt.database.display.playlists.swap(idx, idx + 1);
+                        }
+                    }
+                }
+            }
+            _ => (),
         }
-        std::mem::drop(mgmt);
-        self.selection_down();
     }
 
     fn selection_up(&mut self) {
         // Move the current selection down
+        let artist_list = if self.state().is_sorted_library() {
+            let mgmt = self.mgmt.lock().unwrap();
+            let artists: Vec<String> = mgmt.library_tree.keys().map(|x| x.to_string()).collect();
+            Some(artists)
+        } else {
+            None
+        };
+        let playlist_display = if self.state().is_playlists() {
+            let mgmt = self.mgmt.lock().unwrap();
+            Some(mgmt.database.display.playlists.clone())
+        } else {
+            None
+        };
         match self.state_mut() {
             State::Library { selection, .. } => {
                 if *selection > 0 {
@@ -592,10 +905,36 @@ impl Ui {
                 depth,
                 ..
             } => {
-                if *depth == 0 && *artist > 0 {
-                    *artist -= 1
+                let artists_idx = artist_list
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .position(|x| x == artist)
+                    .unwrap_or(0);
+                if *depth == 0 && artists_idx > 0 {
+                    *artist = artist_list.unwrap()[artists_idx - 1].to_string();
                 } else if *depth == 1 && track[artist] > 0 {
                     *track.get_mut(artist).unwrap() -= 1;
+                }
+            }
+            State::Playlists {
+                playlist,
+                track,
+                depth,
+                ..
+            } => {
+                if playlist.is_empty() {
+                    return;
+                }
+                if *depth == 0 {
+                    let playlist_display = playlist_display.unwrap();
+                    let idx = playlist_display
+                        .iter()
+                        .position(|x| x == playlist)
+                        .unwrap_or(0);
+                    *playlist = playlist_display[idx.saturating_sub(1)].to_string();
+                } else if *depth == 1 {
+                    *track.get_mut(playlist).unwrap() = track[playlist].saturating_sub(1);
                 }
             }
             _ => (),
@@ -604,19 +943,36 @@ impl Ui {
 
     fn selection_down(&mut self) {
         // Move the current selection down
-        let tracks = self.mgmt.lock().unwrap().database.tracks.len();
-        let artists = self.mgmt.lock().unwrap().library_tree.len();
-        // If in sorted library, get list of tracks in artist
-        let track_list = if let State::SortedLibrary { artist, .. } = self.state() {
+        let tracks_len = self.mgmt.lock().unwrap().database.tracks.len();
+        let artists_len = self.mgmt.lock().unwrap().library_tree.len();
+        // If in sorted library, get list of tracks and artists
+        let (track_list, artist_list) = if let State::SortedLibrary { artist, .. } = self.state() {
             let mgmt = self.mgmt.lock().unwrap();
-            Some(artist_tracks(&mgmt.library_tree, *artist))
+            let artists: Vec<String> = mgmt.library_tree.keys().map(|x| x.to_string()).collect();
+            (
+                Some(artist_tracks(&mgmt.library_tree, artist)),
+                Some(artists),
+            )
+        } else {
+            (None, None)
+        };
+        // If in playlists, get playlist display
+        let playlist_data = if let State::Playlists { playlist, .. } = self.state() {
+            if playlist.is_empty() {
+                return;
+            }
+            let mgmt = self.mgmt.lock().unwrap();
+            Some((
+                mgmt.database.display.playlists.clone(),
+                mgmt.database.playlists[playlist].len(),
+            ))
         } else {
             None
         };
         // Perform selection move
         match self.state_mut() {
             State::Library { selection, .. } => {
-                if *selection + 1 < tracks {
+                if *selection + 1 < tracks_len {
                     *selection += 1
                 }
             }
@@ -633,10 +989,35 @@ impl Ui {
                 depth,
                 ..
             } => {
-                if *depth == 0 && *artist + 1 < artists {
-                    *artist += 1
+                let artists_idx = artist_list
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .position(|x| x == artist)
+                    .unwrap_or(0);
+                if *depth == 0 && artists_idx + 1 < artists_len {
+                    *artist = artist_list.unwrap()[artists_idx + 1].to_string();
                 } else if *depth == 1 && track[artist] + 1 < track_list.unwrap().len() {
                     *track.get_mut(artist).unwrap() += 1;
+                }
+            }
+            State::Playlists {
+                playlist,
+                track,
+                depth,
+                ..
+            } => {
+                let (playlist_display, tracks) = playlist_data.unwrap();
+                if *depth == 0 {
+                    let idx = playlist_display
+                        .iter()
+                        .position(|x| x == playlist)
+                        .unwrap_or_else(|| playlist_display.len().saturating_sub(1));
+                    if let Some(next) = playlist_display.get(idx + 1) {
+                        *playlist = next.to_string();
+                    }
+                } else if *depth == 1 && track[playlist] + 1 < tracks {
+                    *track.get_mut(playlist).unwrap() = track[playlist] + 1;
                 }
             }
             _ => (),
@@ -645,6 +1026,25 @@ impl Ui {
 
     fn selection_top(&mut self) {
         // Move the selection to the top of the library
+        let first_artist: Option<String> = if self.state().is_sorted_library() {
+            let mgmt = self.mgmt.lock().unwrap();
+            Some(
+                mgmt.library_tree
+                    .keys()
+                    .nth(0)
+                    .and_then(|x| Some(x.to_string()))
+                    .unwrap_or_else(|| "".to_string()),
+            )
+        } else {
+            None
+        };
+        // If in playlists, get playlist display
+        let playlist_display = if self.state().is_playlists() {
+            let mgmt = self.mgmt.lock().unwrap();
+            Some(mgmt.database.display.playlists.clone())
+        } else {
+            None
+        };
         match self.state_mut() {
             State::Library { selection } => {
                 *selection = 0;
@@ -659,9 +1059,28 @@ impl Ui {
                 ..
             } => {
                 if *depth == 0 {
-                    *artist = 0;
+                    *artist = first_artist.unwrap();
                 } else {
                     *track.get_mut(artist).unwrap() = 0;
+                }
+            }
+            State::Playlists {
+                depth,
+                playlist,
+                track,
+                ..
+            } => {
+                if playlist.is_empty() {
+                    return;
+                }
+                let playlist_display = playlist_display.unwrap();
+                if *depth == 0 {
+                    *playlist = playlist_display
+                        .get(0)
+                        .and_then(|x| Some(x.to_string()))
+                        .unwrap_or_else(|| "".to_string());
+                } else {
+                    *track.get_mut(playlist).unwrap() = 0;
                 }
             }
             _ => (),
@@ -670,18 +1089,34 @@ impl Ui {
 
     fn selection_bottom(&mut self) {
         // Move the selection to the top of the library
-        let tracks = self.mgmt.lock().unwrap().database.tracks.len();
-        let artists = self.mgmt.lock().unwrap().library_tree.len();
+        let tracks_len = self.mgmt.lock().unwrap().database.tracks.len();
         // If in sorted library, get list of tracks in artist
-        let track_list = if let State::SortedLibrary { artist, .. } = self.state() {
+        let (track_list, artist_list) = if let State::SortedLibrary { artist, .. } = self.state() {
             let mgmt = self.mgmt.lock().unwrap();
-            Some(artist_tracks(&mgmt.library_tree, *artist))
+            let artists: Vec<String> = mgmt.library_tree.keys().map(|x| x.to_string()).collect();
+            (
+                Some(artist_tracks(&mgmt.library_tree, artist)),
+                Some(artists),
+            )
+        } else {
+            (None, None)
+        };
+        // If in playlists, get playlist display
+        let playlist_data = if let State::Playlists { playlist, .. } = self.state() {
+            if playlist.is_empty() {
+                return;
+            }
+            let mgmt = self.mgmt.lock().unwrap();
+            Some((
+                mgmt.database.display.playlists.clone(),
+                mgmt.database.playlists[playlist].len(),
+            ))
         } else {
             None
         };
         match self.state_mut() {
             State::Library { selection } => {
-                *selection = tracks.saturating_sub(1);
+                *selection = tracks_len.saturating_sub(1);
             }
             State::Files {
                 selection, list, ..
@@ -695,41 +1130,89 @@ impl Ui {
                 ..
             } => {
                 if *depth == 0 {
-                    *artist = artists.saturating_sub(1);
+                    let artists_len = artist_list.as_ref().unwrap().len();
+                    *artist =
+                        artist_list.as_ref().unwrap()[artists_len.saturating_sub(1)].to_string();
                 } else {
                     *track.get_mut(artist).unwrap() = track_list.unwrap().len().saturating_sub(1);
+                }
+            }
+            State::Playlists {
+                depth,
+                playlist,
+                track,
+            } => {
+                let (playlist_display, tracks) = playlist_data.unwrap();
+                if *depth == 0 {
+                    *playlist = playlist_display
+                        .iter()
+                        .last()
+                        .and_then(|x| Some(x.to_string()))
+                        .unwrap_or_else(|| "".to_string());
+                } else {
+                    *track.get_mut(playlist).unwrap() = tracks.saturating_sub(1);
                 }
             }
             _ => (),
         }
     }
 
+    pub fn update_library(&mut self) {
+        // Prevent rendering with outdated library tree
+        if self.library_updated && self.state().is_sorted_library() {
+            let mut mgmt = self.mgmt.lock().unwrap();
+            let tracks = &mgmt.database.tracks;
+            mgmt.library_tree = form_library_tree(tracks);
+            let artists: Vec<String> = mgmt.library_tree.keys().map(|x| x.to_string()).collect();
+            std::mem::drop(mgmt);
+            if let State::SortedLibrary {
+                track,
+                artist: artist_ptr,
+                ..
+            } = self.state_mut()
+            {
+                for artist in &artists {
+                    if !track.contains_key(artist) {
+                        track.insert(artist.to_string(), 0);
+                    }
+                }
+                track.drain_filter(|t, _| !artists.contains(t));
+                if !artists.contains(&artist_ptr) {
+                    *artist_ptr = artists
+                        .get(0)
+                        .and_then(|x| Some(x.to_string()))
+                        .unwrap_or_else(|| "".to_string());
+                }
+            }
+            self.library_updated = false;
+        }
+    }
+
     pub fn render(&mut self) -> Result<()> {
+        self.update_library();
         // Acquire manager
-        let mut mgmt = self.mgmt.lock().unwrap();
+        let mgmt = self.mgmt.lock().unwrap();
+        // Update library tree if need be
         // Obtain render data for the current state
-        let ((keys, tracks), paths, artist_track): (TrackList, FileList, SortedList) = match self
-            .state()
-        {
+        let ((keys, tracks), paths, artist_track, playlists): (
+            TrackList,
+            FileList,
+            SortedList,
+            OptionList,
+        ) = match self.state() {
             State::Library { .. } => {
                 // Obtain list of tracks
-                let keys = mgmt.database.display.clone();
+                let keys = mgmt.database.display.simple.clone();
                 let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
                 let table = pad_table(format_table(&tracks), self.size.width as usize);
-                ((Some(keys), Some(table)), None, None)
+                ((Some(keys), Some(table)), None, None, None)
             }
             State::SortedLibrary {
                 artist,
-                album,
                 track,
                 depth,
                 ..
             } => {
-                // Prevent rendering with outdated library tree
-                if self.library_updated {
-                    let tracks = &mgmt.database.tracks;
-                    mgmt.library_tree = form_library_tree(tracks);
-                }
                 let id_playing = if mgmt.playlist.is_ready() {
                     mgmt.playlist.current_id()
                 } else {
@@ -737,20 +1220,39 @@ impl Ui {
                 };
                 let table = format_artist_track(
                     &mgmt.library_tree,
-                    (*artist, *album, track),
+                    (artist.to_string(), track),
                     *depth,
                     &mgmt.database.tracks,
                     id_playing,
+                    self.ptr == self.play_ptr,
                 );
-                self.library_updated = false;
-                ((None, None), None, Some(table))
+                ((None, None), None, Some(table), None)
             }
             State::Files { dir, .. } => {
                 // Obtain list of files
                 let files = list_dir(dir, !mgmt.config.show_hidden_files);
-                ((None, None), Some(files), None)
+                ((None, None), Some(files), None, None)
             }
-            State::Empty => ((None, None), None, None),
+            State::Playlists {
+                playlist,
+                track,
+                depth,
+                ..
+            } => {
+                let playlists = format_playlist(
+                    &mgmt.database.playlists,
+                    &mgmt.database.display.playlists,
+                    *depth,
+                    &mgmt.database.tracks,
+                    (&playlist, track),
+                    mgmt.playlist.ptr,
+                    &mgmt.playlist.name,
+                    self.size.width,
+                    &mgmt.config.indicators["playlist_icon"],
+                );
+                ((None, None), None, None, Some(playlists))
+            }
+            State::Empty => ((None, None), None, None, None),
         };
         std::mem::drop(mgmt);
         // Do render
@@ -814,6 +1316,10 @@ impl Ui {
                     let row = format!("{:<pad$}", row, pad = self.size.width as usize);
                     queue!(self.stdout, Print(row))?;
                     queue!(self.stdout, SetBg(Color::Reset), SetFg(Color::Reset))?;
+                }
+            } else if line != status_idx && self.state().is_playlists() {
+                if let Some(row) = playlists.as_ref().unwrap().get(line as usize) {
+                    queue!(self.stdout, Print(row))?;
                 }
             } else if line == status_idx {
                 // Render status line

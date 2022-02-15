@@ -8,15 +8,55 @@
 - [x] Build very basic cli frontend to test backend
 - [x] comment, format, clippy and commit
 --- release ---
-- [ ] Set up playlist mode on pane 2 (0.12.0)
-- [ ] Music discovery on pane 5 (0.13.0)
-- [ ] Tag guessing via Spotify / Deezer API (0.14.0)
-- [ ] LastFM scrobbling (0.15.0)
-- [ ] Track sorting (0.16.0)
-- [ ] Make highly configurable through config file (0.17.0)
-- [ ] Optimisation (0.17)
-    - [ ] Remove use of channels
-    - [ ] Provided stripped binaries
+- [ ] Implement scrolling in simple library (0.12.1)
+    - [ ] Download lots and lots of music
+    - [ ] Implement scrolling in simple library
+- [ ] Implement scrolling in sorted view (0.12.2)
+    - [ ] Implement scrolling in artist side
+    - [ ] Implement scrolling in track side
+- [ ] Implement scrolling in playlists (0.12.3)
+    - [ ] Create lots of playlists
+    - [ ] Implement scrolling in track side
+    - [ ] Implement scrolling in playlist side
+    - [ ] Implement scrolling in track side
+- [ ] Implement scrolling in file browser (0.12.4)
+- [ ] Make sure track ptr operations are applied to all states (0.12.5)
+- [ ] Refactor, ensure documentation, comments, stop annoying function chain space wastage, rustfmt, clippy (0.12.6)
+- [ ] Music download on pane 5 (0.13.0)
+    - [ ] Allow for configuration of external applications
+    - [ ] Create deezer downloading "plugin"
+    - [ ] Allow for youtube-dl integration
+    - [ ] Add form like toggle between plug ins
+    - [ ] Add search box
+    - [ ] Add download button
+    - [ ] Make multithreaded
+    - [ ] Convert release-date and other year tags into id3 year tag
+    - [ ] Write documentation on how to write plugins
+- [ ] Universal playlist updating & Queuing songs (0.14.0)
+    - [ ] Build a queue view pane
+    - [ ] Allow queuing of songs
+        - [ ] See spotify_queue.txt for implementation details
+    - [ ] Build way to update universal queue after deletion or addition of songs
+- [ ] Tag guessing via Spotify / Deezer API (0.15.0)
+    - [ ] Add tokens into config file
+    - [ ] Integrate into music download pane.
+- [ ] LastFM scrobbling (0.16.0)
+    - [ ] Find some way to create a connection to the lastfm api
+    - [ ] Add some token configuration in the config file
+<!-- Point of switching from music player currently in use -->
+- [ ] Track sorting (0.17.0)
+- [ ] Make highly configurable through config file (0.18.0)
+- [ ] Optimisation (0.19)
+    - [ ] Remove use of channels (0.19.1)
+    - [ ] Provided stripped binaries (0.19.2)
+- [ ] Beyond
+    - [ ] Some kind of music recommendation API with streaming : "music store" (0.20.0)
+    - [ ] Potentailly implement nicer dialogs instead of ugly vim-style prompts (0.21.0)
+    - [ ] Depreciate CLI mode (0.22.0)
+    - [ ] Album art with sixel (0.23.0)
+    - [ ] When finding a bug, patch it and then use new version for a month
+    - [ ] If bug is found before month is up, month timer resets
+    - [ ] When month timer is up, start looking to release 1.0.0
 - [x] Queueing (0.2.0)
 - [x] Set up config file (0.3.0)
 - [x] Allow creation of playlists (0.4.0)
@@ -27,3 +67,4 @@
 - [x] Link up library editing through tui (0.9.0)
 - [x] ID3 tag editing in library view (0.10.0)
 - [x] Set up artist -> album -> track sorting through tui on pane 1 (0.11.0)
+- [x] Set up playlist mode on pane 2 (0.12.0)

@@ -11,11 +11,13 @@ const DEFAULT_DATABASE: &str = include_str!("../database.ron");
 // Lower = Quicker reaction times, worse performance
 // Higher = Slower reaction times, better performance
 pub const PULSE: u64 = 200;
+pub const DBUS_PULSE: u64 = 500;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum Pane {
     SimpleLibrary,
     SortedLibrary,
+    Playlists,
     Files,
     Empty,
 }
@@ -46,10 +48,16 @@ impl Config {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct Display {
+    pub simple: Vec<usize>,
+    pub playlists: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Database {
     pub tracks: HashMap<usize, Track>,
     pub playlists: HashMap<String, Vec<usize>>,
-    pub display: Vec<usize>,
+    pub display: Display,
 }
 
 impl Database {
