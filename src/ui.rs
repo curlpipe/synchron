@@ -37,10 +37,11 @@ impl Size {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum State {
     Library {
         selection: usize,
+        offset: usize,
     },
     Files {
         selection: usize,
@@ -130,7 +131,7 @@ impl Ui {
             states.insert(
                 *key,
                 match pane {
-                    Pane::SimpleLibrary => State::Library { selection: 0 },
+                    Pane::SimpleLibrary => State::Library { selection: 0, offset: 0, },
                     Pane::SortedLibrary => State::SortedLibrary {
                         depth: 0,
                         track: track.clone(),
@@ -185,6 +186,7 @@ impl Ui {
                     Event::Key(k) => self.on_key(k),
                     Event::Resize(width, height) => {
                         self.size = Size { width, height };
+                        self.fix_offset();
                         self.render()?;
                     }
                     Event::Mouse(..) => (),
@@ -298,7 +300,23 @@ impl Ui {
             (KMod::NONE, KCode::Char('k')) => self.rename_playlist(),
             // [;] or [:] : Command mode
             (KMod::NONE, KCode::Char(':' | ';')) => (),
+            // Spam
+            (KMod::NONE, KCode::Char('p')) => panic!("{:?}", self.states[&2]),
             // [???] : Do nothing
+            _ => (),
+        }
+    }
+
+    fn fix_offset(&mut self) {
+        // Check if selection is off screen
+        let height = self.size.height.saturating_sub(2).into();
+        match self.state_mut() {
+            State::Library { selection, .. } => {
+                if *selection > height {
+                    // Selection is off the screen
+                    *selection = height;
+                }
+            }
             _ => (),
         }
     }
@@ -766,13 +784,16 @@ impl Ui {
             return;
         }
         match self.state() {
-            State::Library { selection, .. } => {
-                if *selection != 0 {
+            State::Library { selection, offset, .. } => {
+                let sel = *selection + *offset;
+                if sel != 0 {
                     // Update database
                     mgmt.database
                         .display
                         .simple
-                        .swap(*selection, selection.saturating_sub(1));
+                        .swap(sel, sel.saturating_sub(1));
+                    std::mem::drop(mgmt);
+                    self.selection_up();
                 }
             }
             State::Playlists {
@@ -824,14 +845,17 @@ impl Ui {
             return;
         }
         match self.state() {
-            State::Library { selection, .. } => {
-                if *selection < mgmt.database.tracks.len().saturating_sub(1) {
+            State::Library { selection, offset, .. } => {
+                let sel = *selection + *offset;
+                if sel < mgmt.database.tracks.len().saturating_sub(1) {
                     // Update database
                     mgmt.database
                         .display
                         .simple
-                        .swap(*selection, *selection + 1);
+                        .swap(sel, sel + 1);
                 }
+                std::mem::drop(mgmt);
+                self.selection_down();
             }
             State::Playlists {
                 depth,
@@ -889,8 +913,10 @@ impl Ui {
             None
         };
         match self.state_mut() {
-            State::Library { selection, .. } => {
-                if *selection > 0 {
+            State::Library { selection, offset, .. } => {
+                if *selection == 0 && *offset != 0 {
+                    *offset -= 1;
+                } else if *selection > 0 {
                     *selection -= 1
                 }
             }
@@ -970,10 +996,15 @@ impl Ui {
             None
         };
         // Perform selection move
+        let available = self.size.height.saturating_sub(1) as usize;
         match self.state_mut() {
-            State::Library { selection, .. } => {
-                if *selection + 1 < tracks_len {
-                    *selection += 1
+            State::Library { selection, offset, .. } => {
+                if *selection + *offset + 1 < tracks_len {
+                    if *selection == available.saturating_sub(1) {
+                        *offset += 1;
+                    } else {
+                        *selection += 1;
+                    }
                 }
             }
             State::Files {
@@ -1046,8 +1077,9 @@ impl Ui {
             None
         };
         match self.state_mut() {
-            State::Library { selection } => {
+            State::Library { selection, offset } => {
                 *selection = 0;
+                *offset = 0;
             }
             State::Files { selection, .. } => {
                 *selection = 0;
@@ -1114,9 +1146,16 @@ impl Ui {
         } else {
             None
         };
+        let available = self.size.height.saturating_sub(1) as usize;
         match self.state_mut() {
-            State::Library { selection } => {
-                *selection = tracks_len.saturating_sub(1);
+            State::Library { selection, offset } => {
+                if tracks_len < available {
+                    *selection = tracks_len.saturating_sub(1);
+                    *offset = 0;
+                } else {
+                    *selection = available.saturating_sub(1);
+                    *offset = tracks_len - available;
+                }
             }
             State::Files {
                 selection, list, ..
@@ -1200,11 +1239,11 @@ impl Ui {
             SortedList,
             OptionList,
         ) = match self.state() {
-            State::Library { .. } => {
+            State::Library { offset, .. } => {
                 // Obtain list of tracks
                 let keys = mgmt.database.display.simple.clone();
                 let tracks: Vec<&Track> = keys.iter().map(|x| &mgmt.database.tracks[x]).collect();
-                let table = pad_table(format_table(&tracks), self.size.width as usize);
+                let table = pad_table(format_table(&tracks, *offset), self.size.width as usize);
                 ((Some(keys), Some(table)), None, None, None)
             }
             State::SortedLibrary {

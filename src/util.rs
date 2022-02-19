@@ -122,7 +122,7 @@ pub fn remove_column(mut table: Vec<Vec<String>>, column: usize) -> Vec<Vec<Stri
     table
 }
 
-pub fn format_table(tracks: &[&Track]) -> Vec<Vec<String>> {
+pub fn format_table(tracks: &[&Track], offset: usize) -> Vec<Vec<String>> {
     // Format a list of tracks into a table
     let mut result = vec![];
     let tracks: Vec<(String, &String, &String, &String, &String)> =
@@ -140,7 +140,7 @@ pub fn format_table(tracks: &[&Track]) -> Vec<Vec<String>> {
         limits.push(find_longest(column));
     }
     // Reform back into rows, taking into account the maximum column size
-    for i in 0..tracks.len() {
+    for i in offset..tracks.len() {
         let mut row = vec![];
         row.push(align_left(columns[0][i], limits[0]));
         row.push(align_left(columns[1][i], limits[1]));
@@ -430,7 +430,7 @@ pub fn format_playlist(
     // Generate rhs table
     let tracks: Vec<&Track> = this.iter().map(|x| &lookup[x]).collect();
     let table = pad_table(
-        format_table(&tracks),
+        format_table(&tracks, 0), // NOTE: CHANGE OFFSET HERE WHEN IMPLEMENTING IN FUTURE
         (width as usize).saturating_sub(longest + icon.width() + 6),
     );
     // Format rhs
